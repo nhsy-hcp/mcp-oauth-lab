@@ -1,0 +1,10 @@
+{
+  "bound_service_account_names": ["mcp-client-*-sa"],
+  "bound_service_account_namespaces": ["mcp-client-*"],
+  "audience": "vault",
+  "alias_name_source": "serviceaccount_uid",
+  "token_policies": ["mcp-client"],
+  "token_type": "service",
+  "token_ttl": "15m",
+  "token_max_ttl": "30m"
+}

@@ -80,6 +80,13 @@ class VaultIdentityAuth(httpx2.Auth):
         yield request
 
 
+def _root_cause(exc: BaseException) -> BaseException:
+    """The first leaf of an (anyio task group) ExceptionGroup, e.g. the HTTPStatusError for a 401."""
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
 def _summary(result: Any) -> dict[str, Any]:
     text = " ".join(getattr(c, "text", "") for c in (result.content or []))
     return {"is_error": bool(result.is_error), "text": text[:300]}
@@ -96,8 +103,9 @@ async def run_once(config: ClientConfig, auth: httpx2.Auth) -> None:
     except TokenUnavailable as exc:
         log_event(log, logging.WARNING, "mcp_call_failed", error="token_unavailable", status=exc.status)
     except Exception as exc:
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        log_event(log, logging.WARNING, "mcp_call_failed", error=type(exc).__name__, status=status, detail=str(exc)[:200])
+        cause = _root_cause(exc)
+        status = getattr(getattr(cause, "response", None), "status_code", None)
+        log_event(log, logging.WARNING, "mcp_call_failed", error=type(cause).__name__, status=status, detail=str(cause)[:200])
 
 
 async def loop(config: ClientConfig, auth: httpx2.Auth, stop: threading.Event) -> None:
@@ -114,6 +122,7 @@ def main() -> int:
         log_event(log, logging.ERROR, "config_invalid", error=str(exc))
         return 2
     configure_logging(config.log_level)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)  # one line per HTTP request is noise here
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())

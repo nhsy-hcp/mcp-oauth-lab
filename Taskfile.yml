@@ -24,6 +24,8 @@ vars:
   mcp_host_port: "8000"
   # Lifetime of the Vault identity JWT a client presents to the MCP server (set 1m for the expiry demo)
   mcp_token_ttl: 5m
+  # How often each client pod calls the MCP server
+  client_interval_seconds: "20"
 
 dotenv:
   - .env
@@ -130,6 +132,8 @@ tasks:
       - task: config:db-secret
       - task: config:k8s-auth
       - task: deploy:mcp-server
+      - task: config:mcp-auth
+      - task: deploy:mcp-clients
 
   install:
     desc: Install, initialise, unseal and configure Vault
@@ -241,6 +245,30 @@ tasks:
         MCP_HOST_PORT={{.mcp_host_port}}
         scripts/deploy-workloads.sh vault-ce/servers.json mcp-server-deployment mcp-orders mcp-server
         {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
+
+  # ==========================================================================
+  # Identity broker: Vault identity tokens for MCP clients
+  # ==========================================================================
+  config:mcp-auth:
+    desc: identity/oidc key + role mcp-orders, mcp-client policy and role, client entities and groups
+    preconditions:
+      - test -f vault-init.json
+    cmds:
+      - scripts/config-mcp-auth.sh {{.mcp_token_ttl}} {{.token_ttl}} {{.token_max_ttl}}
+
+  deploy:mcp-clients:
+    desc: Deploy the MCP client pods (orders-agent, reporting-agent, unlisted); the laptop client has no pod
+    cmds:
+      - >-
+        CLIENT_INTERVAL_SECONDS={{.client_interval_seconds}}
+        scripts/deploy-workloads.sh vault-ce/mcp-clients.json mcp-client-deployment mcp-client mcp-client
+        {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
+
+  mcp:token:
+    desc: Print a short-lived Vault identity JWT for the laptop client (mcp-client-laptop ServiceAccount)
+    silent: true
+    cmds:
+      - scripts/mcp-token.sh
 
   logs:
     desc: "Follow logs (NS=mcp-server-orders-preview|mcp-client-orders-agent|..., C=app|vault-proxy)"

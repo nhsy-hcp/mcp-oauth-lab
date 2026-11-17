@@ -14,6 +14,15 @@ HashiCorp Vault as an **identity broker for MCP auth**, on a local k3d cluster.
 
 ![Architecture](docs/images/architecture.png)
 
+> **Disclaimer: lab demo only.** This repository is for learning and is not a production reference architecture.
+> It runs plain HTTP, configures Vault with the root token, keeps unseal keys in a local file and runs a single
+> Vault node.
+>
+> Enterprise MCP deployments need a **production-grade OAuth 2.1 authorization server** (an enterprise IdP), as
+> described in the [MCP authorization specification](https://modelcontextprotocol.io/specification/latest/basic/authorization).
+> Clients such as Claude then use standard discovery and per-user consent instead of the pre-minted bearer tokens
+> used here. See [Limits and next steps](docs/solution-design.md#9-limits-and-next-steps).
+
 ## Quick start
 
 ```bash

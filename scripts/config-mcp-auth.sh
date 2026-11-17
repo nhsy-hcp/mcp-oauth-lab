@@ -59,14 +59,28 @@ while read -r row <&3; do
   fi
 
   uid="$(kubectl get sa "${APP_NAME}-sa" -n "${APP_NAME}" -o jsonpath='{.metadata.uid}')"
-  # Reuse the entity Vault already created for this SA (alias = SA UID), else the named one, else create it
-  entity_id="$(vault_cmd write -format=json identity/lookup/entity alias_name="${uid}" alias_mount_accessor="${accessor}" 2>/dev/null | jq -r '.data.id // empty' || true)"
+  # One named entity per client, whose single auth/kubernetes alias is the SA's current UID.
+  entity="$(vault_cmd read -format=json "identity/entity/name/${APP_NAME}" 2>/dev/null || true)"
+  [ -n "${entity}" ] || entity='{}'
+  entity_id="$(jq -r '.data.id // empty' <<<"${entity}")"
   if [ -z "${entity_id}" ]; then
-    entity_id="$(vault_cmd read -format=json "identity/entity/name/${APP_NAME}" 2>/dev/null | jq -r '.data.id // empty' || true)"
-    if [ -z "${entity_id}" ]; then
-      entity_id="$(vault_cmd write -format=json identity/entity name="${APP_NAME}" metadata=team="${TEAM}" | jq -r '.data.id')"
-    fi
+    entity_id="$(vault_cmd write -format=json identity/entity name="${APP_NAME}" metadata=team="${TEAM}" | jq -r '.data.id')"
+    entity='{}'
+  fi
+  # A recreated SA has a new UID: drop the entity's alias for the old one (Vault allows one alias per mount).
+  for stale in $(jq -r --arg a "${accessor}" --arg u "${uid}" '.data.aliases // [] | .[] | select(.mount_accessor == $a and .name != $u) | .id' <<<"${entity}"); do
+    vault_cmd delete "identity/entity-alias/id/${stale}" >/dev/null
+    log "${APP_NAME}: removed alias ${stale} for an earlier ServiceAccount UID"
+  done
+  # If the new SA already logged in, Vault created an unnamed entity for its UID: move that alias here.
+  owner="$(vault_cmd write -format=json identity/lookup/entity alias_name="${uid}" alias_mount_accessor="${accessor}" 2>/dev/null || true)"
+  [ -n "${owner}" ] || owner='{}'
+  alias_id="$(jq -r --arg a "${accessor}" --arg u "${uid}" '.data.aliases // [] | .[] | select(.mount_accessor == $a and .name == $u) | .id' <<<"${owner}")"
+  if [ -z "${alias_id}" ]; then
     vault_cmd write identity/entity-alias name="${uid}" canonical_id="${entity_id}" mount_accessor="${accessor}" >/dev/null
+  elif [ "$(jq -r '.data.id' <<<"${owner}")" != "${entity_id}" ]; then
+    vault_cmd write "identity/entity-alias/id/${alias_id}" name="${uid}" canonical_id="${entity_id}" mount_accessor="${accessor}" >/dev/null
+    log "${APP_NAME}: moved alias ${uid} from entity $(jq -r '.data.name' <<<"${owner}") to ${APP_NAME}"
   fi
   printf '%s %s\n' "${group}" "${entity_id}" >>"${members_file}"
   log "${APP_NAME}: entity ${entity_id} (alias ${uid}) -> group ${group}"

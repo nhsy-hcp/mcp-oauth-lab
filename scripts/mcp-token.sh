@@ -5,7 +5,7 @@
 #   3. read identity/oidc/token/mcp-orders, then revoke the Vault token straight away
 # Only the JWT reaches stdout. The root token from .env is never used.
 #
-# Usage: scripts/mcp-token.sh            e.g. curl -H "Authorization: Bearer $(task mcp:token)" ...
+# Usage: scripts/mcp-token.sh | sed 's/^/Authorization: Bearer /' | curl -H @- ...   (header on stdin, not argv)
 set -euo pipefail
 
 NS="mcp-client-laptop"

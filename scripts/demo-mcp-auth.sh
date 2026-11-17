@@ -1,5 +1,5 @@
 #!/bin/bash
-# Identity-broker scenarios A1-A11: Vault issues short-lived, audience-bound identity JWTs; the MCP server
+# Identity-broker scenarios A1-A12: Vault issues short-lived, audience-bound identity JWTs; the MCP server
 # authorises tools by Vault group. Exits non-zero if any check fails. Restores any Vault change it makes.
 #
 # Usage: scripts/demo-mcp-auth.sh <mcp_token_ttl> <demo_token_ttl> <token_ttl> <token_max_ttl>
@@ -17,7 +17,8 @@ START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 VAULT_TOKEN="$(root_token)"
 export VAULT_TOKEN
 
-client_logs() { kubectl logs -n "$1" deploy/mcp-client -c app --since=10m; }
+# Only lines logged since this run started, so an older success cannot mask a regression
+client_logs() { kubectl logs -n "$1" deploy/mcp-client -c app --since-time="${START}"; }
 wait_for_log() { # wait_for_log <namespace> <jq-filter>: true once a log line matches (up to ~60 s)
   for _ in $(seq 1 30); do
     client_logs "$1" | grep '^{' | jq -e "select($2)" >/dev/null 2>&1 && return 0
@@ -25,9 +26,28 @@ wait_for_log() { # wait_for_log <namespace> <jq-filter>: true once a log line ma
   done
   return 1
 }
+accessor="$(auth_accessor)"
 reader_members() { vault_cmd read -format=json identity/group/name/mcp-orders-reader | jq -r '.data.member_entity_ids // [] | join(",")'; }
 
+# Vault tokens still alive for <namespace>'s ServiceAccount (root lists every accessor, then looks each up)
+live_tokens() {
+  local a n=0
+  for a in $(vault_cmd list -format=json auth/token/accessors | jq -r '.[]'); do
+    if printf '{"accessor":"%s"}' "${a}" | vault_cmd_in write -format=json auth/token/lookup-accessor - 2>/dev/null \
+      | jq -e --arg ns "$1" '.data.meta.service_account_namespace == $ns' >/dev/null; then
+      n=$((n + 1))
+    fi
+  done
+  echo "${n}"
+}
+named_entity() { vault_cmd read -format=json "identity/entity/name/$1"; }
+k8s_alias() { jq -r --arg a "${accessor}" '[.data.aliases // [] | .[] | select(.mount_accessor == $a)]' <<<"$1"; }
+
 restore() {
+  if [ "${RECONFIG:-false}" = true ]; then
+    vault_cmd delete identity/entity/name/a12-auto-login >/dev/null 2>&1 || true
+    scripts/config-mcp-auth.sh "${MCP_TOKEN_TTL}" "${TOKEN_TTL}" "${TOKEN_MAX_TTL}" >/dev/null
+  fi
   [ -n "${READER_MEMBERS:-}" ] && vault_cmd write identity/group/name/mcp-orders-reader type=internal member_entity_ids="${READER_MEMBERS}" >/dev/null
   if [ "${TTL_CHANGED:-false}" = true ]; then
     scripts/config-mcp-auth.sh "${MCP_TOKEN_TTL}" "${TOKEN_TTL}" "${TOKEN_MAX_TTL}" >/dev/null
@@ -95,6 +115,11 @@ log "A10 Laptop client via task mcp:token"
 laptop="$(scripts/mcp-token.sh)"
 rows="$(mcp_tool "${laptop}" list_orders '{"status":"pending"}' | jq -r '.structuredContent.result | length')"
 check "laptop token lists pending orders (${rows} rows)" test "${rows:-0}" -ge 1
+logins="$(kubectl logs vault-0 -n vault --since-time="${START}" | grep '^{' \
+  | jq -c 'select(.type == "response" and .request.path == "auth/kubernetes/login" and .auth.metadata.service_account_namespace == "mcp-client-laptop")' | wc -l | tr -d ' ')"
+check "the laptop logged in to Vault (${logins} logins in this run)" test "${logins}" -ge 1
+live="$(live_tokens mcp-client-laptop)"
+check "no laptop Vault token is still alive (${live})" test "${live}" = 0
 
 log "A11 Vault audit log: who touched what"
 # Successful responses only (no error), excluding this script's own root-token calls
@@ -109,9 +134,33 @@ denials="$(kubectl logs vault-0 -n vault --since-time="${START}" | grep '^{' | j
 echo "${denials}" | sed 's/^/    denied: /'
 check "A3 and A4 denials are in the audit log" bash -c 'grep -q "^mcp-server-orders-preview identity/oidc/token/mcp-orders$" <<<"$1" && grep -q "^mcp-client-orders-agent database/creds/preview-orders$" <<<"$1"' _ "${denials}"
 
+log "A12 Re-running config:mcp-auth after a ServiceAccount is recreated"
+# A recreated SA has a new UID. Simulate it on orders-agent: point its entity's alias at an old UID, then re-run.
+RECONFIG=true
+uid="$(kubectl get sa mcp-client-orders-agent-sa -n mcp-client-orders-agent -o jsonpath='{.metadata.uid}')"
+agent="$(named_entity mcp-client-orders-agent)"
+agent_id="$(jq -r .data.id <<<"${agent}")"
+alias_id="$(k8s_alias "${agent}" | jq -r '.[0].id')"
+vault_cmd write "identity/entity-alias/id/${alias_id}" name="00000000-old-${uid:0:8}" canonical_id="${agent_id}" mount_accessor="${accessor}" >/dev/null
+check "re-run succeeds when the entity's alias is for an old UID" scripts/config-mcp-auth.sh "${MCP_TOKEN_TTL}" "${TOKEN_TTL}" "${TOKEN_MAX_TTL}"
+agent="$(named_entity mcp-client-orders-agent)"
+check "the entity's only auth/kubernetes alias is the current UID" test "$(k8s_alias "${agent}" | jq -r 'map(.name) | join(",")')" = "${uid}"
+check "the entity is still in mcp-orders-reader" bash -c 'grep -qx "$1" <<<"$2"' _ "${agent_id}" "$(reader_members | tr , '\n')"
+# The new SA logged in before the re-run: Vault created an unnamed entity holding its UID alias.
+alias_id="$(k8s_alias "${agent}" | jq -r '.[0].id')"
+vault_cmd write "identity/entity-alias/id/${alias_id}" name="00000000-old-${uid:0:8}" canonical_id="${agent_id}" mount_accessor="${accessor}" >/dev/null
+auto_id="$(vault_cmd write -format=json identity/entity name=a12-auto-login | jq -r .data.id)"
+vault_cmd write identity/entity-alias name="${uid}" canonical_id="${auto_id}" mount_accessor="${accessor}" >/dev/null
+check "re-run succeeds when the new UID already belongs to another entity" scripts/config-mcp-auth.sh "${MCP_TOKEN_TTL}" "${TOKEN_TTL}" "${TOKEN_MAX_TTL}"
+owner="$(vault_cmd write -format=json identity/lookup/entity alias_name="${uid}" alias_mount_accessor="${accessor}" | jq -r .data.id)"
+check "the current UID's alias moved back to mcp-client-orders-agent" test "${owner}" = "${agent_id}"
+check "the entity's only auth/kubernetes alias is the current UID" test "$(k8s_alias "$(named_entity mcp-client-orders-agent)" | jq -r 'map(.name) | join(",")')" = "${uid}"
+vault_cmd delete identity/entity/name/a12-auto-login >/dev/null
+RECONFIG=false
+
 echo
 if [ "${FAILURES}" -gt 0 ]; then
   err "${FAILURES} check(s) failed"
   exit 1
 fi
-log "A1-A11 passed"
+log "A1-A12 passed"

@@ -19,8 +19,9 @@ token has no access, and any token it already holds expires within 5 minutes.
 ![Architecture](images/architecture.png)
 
 **Platform:** k3d (`vault-mcp-lab`), HashiCorp Vault 2.2.2 (single-node Raft), PostgreSQL 16 and MCP Python SDK 2.3. MCP
-is on `http://127.0.0.1:8000/mcp` (NodePort 30800, loopback only) and Vault is on `http://localhost:8200`. Vault
-uses its default mount paths: `auth/kubernetes`, `database/` and the built-in `identity/oidc`.
+is on `http://127.0.0.1:8000/mcp` (NodePort 30800) and Vault on `http://127.0.0.1:8200` (NodePort 30820), both
+bound to loopback only. Vault uses its default mount paths: `auth/kubernetes`, `database/` and the built-in
+`identity/oidc`.
 
 ## 2. Goals and non-goals
 
@@ -192,5 +193,5 @@ can act as the laptop client.
 
 ## 10. Acceptance tests
 
-`task test:all` runs the unit tests, then `demo:mcp` (M1–M8) and `demo:mcp-auth` (A1–A11) against the live lab.
+`task test:all` runs the unit tests, then `demo:mcp` (M1–M8) and `demo:mcp-auth` (A1–A12) against the live lab.
 See `docs/walkthrough.md` for what each scenario shows.

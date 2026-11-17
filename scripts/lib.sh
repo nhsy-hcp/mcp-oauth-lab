@@ -84,13 +84,14 @@ check() { # check <description> <command...>: PASS if the command succeeds
 # POST one JSON-RPC request to the MCP server (stateless, JSON responses).
 # Usage: mcp_rpc <bearer-token|""> <method> [params-json]   -> prints "<http-status> <body>"
 mcp_rpc() {
-  local token="$1" method="$2" params="${3:-}" auth=()
+  local token="$1" method="$2" params="${3:-}"
   [ -n "${params}" ] || params='{}'
-  [ -n "${token}" ] && auth=(-H "Authorization: Bearer ${token}")
-  curl -s -o /dev/stdout -w ' %{http_code}' -X POST "${MCP_URL}" "${auth[@]}" \
-    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -d "$(jq -cn --arg m "${method}" --argjson p "${params}" '{jsonrpc: "2.0", id: 1, method: $m, params: $p}')" \
-    | awk '{status=$NF; $NF=""; print status, $0}'
+  # The bearer header goes to curl on stdin (-H @-), never on its command line; printf is a builtin.
+  { [ -z "${token}" ] || printf 'Authorization: Bearer %s\n' "${token}"; } \
+    | curl -s -o /dev/stdout -w ' %{http_code}' -X POST "${MCP_URL}" -H @- \
+      -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+      -d "$(jq -cn --arg m "${method}" --argjson p "${params}" '{jsonrpc: "2.0", id: 1, method: $m, params: $p}')" \
+      | awk '{status=$NF; $NF=""; print status, $0}'
 }
 
 # Call a tool and print the JSON-RPC result (or nothing on HTTP error). Usage: mcp_tool <token> <tool> [args-json]

@@ -19,11 +19,11 @@ HashiCorp Vault as an **identity broker for MCP auth**, on a local k3d cluster.
 ```bash
 task init     # pre-commit hooks, Helm repo, .env, Python venv
 task all      # k3d cluster, Vault, PostgreSQL, auth, MCP server, identity broker, client pods
-task test:all # unit tests + live scenarios M1-M8 and A1-A11
+task test:all # unit tests + live scenarios M1-M8 and A1-A12
 
-TOKEN=$(task mcp:token)
-curl -s -X POST localhost:8000/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
+# The header goes to curl on stdin (-H @-), so the token never appears in `ps`
+task mcp:token | sed 's/^/Authorization: Bearer /' | curl -s -X POST localhost:8000/mcp -H @- \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_orders","arguments":{"status":"pending"}}}'
 ```
 

@@ -3,5 +3,5 @@
 # Vault identity JWT, so the MCP client never stores a long-lived credential.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-jwt="$(scripts/mcp-token.sh)"
-jq -cn --arg jwt "${jwt}" '{Authorization: ("Bearer " + $jwt)}'
+# The JWT reaches jq on stdin, never as an argument (visible in ps).
+scripts/mcp-token.sh | jq -cR '{Authorization: ("Bearer " + .)}'

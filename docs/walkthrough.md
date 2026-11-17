@@ -30,7 +30,9 @@ TOKEN=$(task mcp:token)
 cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+' | base64 -d 2>/dev/null; echo   # iss, aud=mcp-orders, groups, exp
 ```
 
-Call a tool with the MCP Inspector CLI. Its flags vary by version; `curl` in the README always works.
+Call a tool with the MCP Inspector CLI. Its flags vary by version; `curl` in the README always works. The
+Inspector only takes the header as an argument, so the token is visible in `ps` for the run; the README `curl` and
+`headersHelper` keep it on stdin.
 
 ```bash
 npx @modelcontextprotocol/inspector --cli http://localhost:8000/mcp --transport http \
@@ -95,6 +97,12 @@ kubectl logs vault-0 -n vault | grep '^{' | jq -c 'select(.type=="response") |
 Only `mcp-server-orders-preview` receives `database/creds/preview-orders`. Only `mcp-client-*` identities receive
 `identity/oidc/token/mcp-orders`. The denied attempts are logged too.
 
+## 9. Recreated ServiceAccounts (A12)
+
+A recreated ServiceAccount has a new UID, so Vault sees a new alias. `task config:mcp-auth` moves the client's
+named entity onto the new UID, including when the new SA already logged in and Vault made an unnamed entity for
+it. `demo:mcp-auth` simulates both cases on orders-agent and re-runs the script.
+
 ## Scenario index
 
 | # | Scenario | Expected |
@@ -114,5 +122,6 @@ Only `mcp-server-orders-preview` receives `database/creds/preview-orders`. Only 
 | A7 | Tool outside the client's group | Tool error: not permitted |
 | A8 | Valid Vault login, no group | `401` |
 | A9 | Group membership removed in Vault | Fresh token `401`; restored → `200` |
-| A10 | Laptop via `task mcp:token` | Rows returned; laptop Vault token already revoked |
+| A10 | Laptop via `task mcp:token` | Rows returned; no laptop Vault token left alive |
 | A11 | Audit log | Credentials and tokens issued only to the expected identities; denials recorded |
+| A12 | `config:mcp-auth` re-run after a ServiceAccount is recreated | Alias follows the new UID; group membership kept |

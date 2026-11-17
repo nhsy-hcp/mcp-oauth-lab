@@ -29,7 +29,9 @@ check "M5 other environment database/creds/production-orders is denied" test "$(
 log "M6  No secrets in the app container"
 env_out="$(kubectl exec -n "${SERVER_NS}" deploy/mcp-orders -c app -- env)"
 check "no VAULT_TOKEN or password in the app environment" bash -c '! grep -Eiq "^(VAULT_TOKEN|.*PASSWORD)=" <<<"$1"' _ "${env_out}"
-check "no ServiceAccount or Vault token mounted in the app container" bash -c '! kubectl exec -n "$1" deploy/mcp-orders -c app -- ls /var/run/secrets >/dev/null 2>&1' _ "${SERVER_NS}"
+# Ask the app container itself, so a failed kubectl exec is a FAIL rather than "nothing mounted"
+mounted="$(kubectl exec -n "${SERVER_NS}" deploy/mcp-orders -c app -- python -c 'import os; print(os.path.exists("/var/run/secrets"))' 2>&1 || true)"
+check "no ServiceAccount or Vault token mounted in the app container (exists: ${mounted})" test "${mounted}" = False
 
 log "M7  Break-glass revoke, then the server recovers on its own"
 scripts/vault.sh lease revoke -prefix database/creds/preview-orders >/dev/null

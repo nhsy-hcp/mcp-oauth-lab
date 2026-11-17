@@ -23,15 +23,15 @@ else
   echo "Creating cluster '${CLUSTER_NAME}' (${K3S_IMAGE})..."
   # --wait=false: Podman's journald log driver causes log-read failures during wait;
   # cluster-ready.sh is the readiness gate instead.
-  # Vault is exposed on localhost:8200 (NodePort 30820); the MCP server on 127.0.0.1:<mcp-host-port> only (NodePort 30800),
-  # so the MCP endpoint is never reachable from the LAN.
+  # Vault (NodePort 30820) and the MCP server (NodePort 30800) are bound to 127.0.0.1:8200 and 127.0.0.1:<mcp-host-port>,
+  # so neither is reachable from the LAN.
   # Unlike the reference repo, anonymous-auth stays off: Kubernetes auth uses TokenReview.
   # Podman occasionally fails k3d's log read during create; k3d rolls back, so retry once.
   for attempt in 1 2; do
     if k3d cluster create "${CLUSTER_NAME}" \
       --image "${K3S_IMAGE}" \
       --wait=false \
-      --port 8200:30820@server:0 \
+      --port 127.0.0.1:8200:30820@server:0 \
       --port "127.0.0.1:${MCP_HOST_PORT}:30800@server:0" \
       --k3s-arg "--disable=traefik,servicelb@server:0"; then
       break

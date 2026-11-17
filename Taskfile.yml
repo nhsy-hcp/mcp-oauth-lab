@@ -88,7 +88,7 @@ tasks:
       - rm -f .tmp/mcp-lab.tar
 
   test:all:
-    desc: Unit tests plus live acceptance checks on the running lab (M1-M8, A1-A11)
+    desc: Unit tests plus live acceptance checks on the running lab (M1-M8, A1-A12)
     cmds:
       - task: test
       - task: demo:mcp
@@ -285,7 +285,7 @@ tasks:
       - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp.sh
 
   demo:mcp-auth:
-    desc: A1-A11 - Vault as identity broker - 401s, forged/expired tokens, group-based tools, central revoke, audit
+    desc: A1-A12 - Vault as identity broker - 401s, forged/expired tokens, group-based tools, central revoke, audit
     cmds:
       - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp-auth.sh {{.mcp_token_ttl}} {{.demo_token_ttl}} {{.token_ttl}} {{.token_max_ttl}}
 

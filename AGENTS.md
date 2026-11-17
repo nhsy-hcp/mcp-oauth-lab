@@ -53,7 +53,7 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
 | `task down` | Stops the cluster, keeping its data; afterwards run `task cluster:up` and `task unseal:vault` |
 | `task lint` | Runs every pre-commit hook plus a full-history gitleaks scan |
 | `task test` | Runs the unit tests (no cluster) |
-| `task test:all` | Unit tests plus `demo:mcp` (M1-M8) and `demo:mcp-auth` (A1-A11) on the running lab |
+| `task test:all` | Unit tests plus `demo:mcp` (M1-M8) and `demo:mcp-auth` (A1-A12) on the running lab |
 | `task mcp:token` | Prints a 5-minute Vault identity JWT for the laptop client |
 | `task docs:diagrams` | Renders `docs/diagrams/*.py` to `docs/images/*.png` (needs Graphviz) |
 | `task test:ci` | Lint and unit tests; with `E2E=true`, also builds the lab and runs `test:all` |

@@ -38,7 +38,8 @@ GROUP_TOOLS: Mapping[str, frozenset[str]] = {
     "mcp-orders-reader": frozenset({"list_orders", "get_order", "whoami"}),
     "mcp-orders-reporter": frozenset({"list_orders"}),
 }
-# Never refetch JWKS more often than this on unknown kids: a stream of forged kids must not hammer Vault.
+# Never fetch JWKS more often than this, whether the last attempt worked or not: a stream of forged kids,
+# or Vault being down, must not hammer Vault or queue requests behind a slow fetch.
 MIN_REFRESH_SECONDS = 10.0
 
 # (status, headers, json body) - the shape of VaultClient.read
@@ -76,7 +77,7 @@ class VaultJwtVerifier:
         self.group_tools = group_tools
         self._clock = clock
         self._jwks: jwt.PyJWKSet | None = None
-        self._fetched_at = -MIN_REFRESH_SECONDS
+        self._attempted_at = float("-inf")
         self._lock = threading.Lock()
 
     def _fetch_jwks(self) -> jwt.PyJWKSet:
@@ -86,13 +87,23 @@ class VaultJwtVerifier:
         return jwt.PyJWKSet.from_dict(body)
 
     def signing_key(self, kid: str | None) -> jwt.PyJWK | None:
-        """Key for ``kid``; refetches once (rate-limited) when the kid is unknown, e.g. after rotation."""
+        """Key for ``kid``; fetches JWKS when the kid is unknown (first use, key rotation).
+
+        At most one attempt per :data:`MIN_REFRESH_SECONDS`, counted from the attempt rather than a
+        success, so failures are throttled too. The lock only guards the cache; the fetch runs outside
+        it, so a hanging Vault never blocks verification of tokens whose key is already cached.
+        """
         if not kid:
             return None
         with self._lock:
-            if self._jwks is None or (self._find(kid) is None and self._clock() - self._fetched_at >= MIN_REFRESH_SECONDS):
-                self._jwks = self._fetch_jwks()
-                self._fetched_at = self._clock()
+            key = self._find(kid)
+            now = self._clock()
+            if key is not None or now - self._attempted_at < MIN_REFRESH_SECONDS:
+                return key
+            self._attempted_at = now
+        jwks = self._fetch_jwks()
+        with self._lock:
+            self._jwks = jwks
             return self._find(kid)
 
     def _find(self, kid: str) -> jwt.PyJWK | None:

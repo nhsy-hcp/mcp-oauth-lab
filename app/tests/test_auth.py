@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -100,11 +101,52 @@ def test_unknown_kid_refetch_is_rate_limited(vault):
 
 
 def test_jwks_unavailable_rejects_and_recovers(vault):
+    clock = Clock()
     vault.jwks_status = 503  # e.g. Vault sealed
-    v = verifier(vault)
+    v = verifier(vault, clock)
     assert v.verify(vault.mint()) is None
     vault.jwks_status = 200
+    clock.now += MIN_REFRESH_SECONDS
     assert v.verify(vault.mint()) is not None
+
+
+def test_failed_jwks_fetch_is_rate_limited(vault):
+    """Regression: a failed fetch must count towards the limit, or a down Vault gets one fetch per request."""
+    clock = Clock()
+    vault.jwks_status = 503
+    v = verifier(vault, clock)
+    for _ in range(5):
+        assert v.verify(vault.mint()) is None
+    assert vault.reads.count("identity/oidc/.well-known/keys") == 1
+
+
+def test_jwks_fetch_does_not_block_cached_keys(vault):
+    """Regression: a slow JWKS fetch (forged kid) must not hold the lock that verifying a known kid needs."""
+    clock = Clock()
+    v = verifier(vault, clock)
+    assert v.verify(vault.mint()) is not None
+    clock.now += MIN_REFRESH_SECONDS
+    started, release = threading.Event(), threading.Event()
+    real_read = v._read
+
+    def slow_read(path):
+        started.set()
+        release.wait(5)
+        return real_read(path)
+
+    v._read = slow_read
+    forged = threading.Thread(target=v.verify, args=(vault.mint(kid="kid-forged"),))
+    forged.start()
+    try:
+        assert started.wait(5)
+        done = threading.Event()
+        result = []
+        threading.Thread(target=lambda: (result.append(v.verify(vault.mint())), done.set())).start()
+        assert done.wait(2), "valid token blocked behind the JWKS fetch"
+        assert result[0] is not None
+    finally:
+        release.set()
+        forged.join(5)
 
 
 def test_tools_for_groups_ignores_non_strings():

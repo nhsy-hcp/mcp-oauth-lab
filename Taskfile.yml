@@ -1,0 +1,126 @@
+version: '3'
+
+# Vault CE as an identity broker for MCP auth on k3d:
+# client pods (and the laptop) trade a Kubernetes identity for a short-lived Vault identity JWT;
+# the MCP server verifies it against Vault's JWKS and reads dynamic PostgreSQL credentials via Vault Proxy.
+# Design: docs/solution-design.md
+
+vars:
+  cluster_name: vault-mcp-lab
+  k3s_image: rancher/k3s:v1.36.6-k3s1
+  vault_chart_version: "0.34.1"
+  vault_image: hashicorp/vault
+  vault_version_tag: "2.2.2"
+  postgres_image: postgres:16-alpine
+  app_image: localhost/mcp-lab:local
+  container_cli:
+    sh: command -v podman >/dev/null 2>&1 && echo podman || echo docker
+  # TTLs: db max_ttl must never exceed token_max_ttl (leases are children of the Proxy token)
+  db_default_ttl: 10m
+  db_max_ttl: 30m
+  token_ttl: 15m
+  token_max_ttl: 30m
+  # Lifetime of the Vault identity JWT a client presents to the MCP server (set 1m for the expiry demo)
+  mcp_token_ttl: 5m
+
+dotenv:
+  - .env
+
+tasks:
+  # ==========================================================================
+  # Standard interface
+  # ==========================================================================
+  default:
+    silent: true
+    cmds:
+      - task --list
+
+  init:
+    desc: One-time setup - install pre-commit hooks, add Helm repo, create .env, sync app deps
+    cmds:
+      - task: deps
+      - |
+        if command -v pre-commit >/dev/null 2>&1; then
+          pre-commit install
+        else
+          echo "Note: pre-commit not installed, skipping hook install (needed only for task lint)"
+        fi
+      - helm repo add hashicorp https://helm.releases.hashicorp.com 2>/dev/null || true
+      - helm repo update hashicorp
+      - test -f .env || cp .env.template .env
+      - uv sync --project app
+
+  deps:
+    desc: Check required CLI tools are installed
+    aliases: [prerequisites]
+    silent: true
+    cmds:
+      - scripts/check-deps.sh
+
+  lint:
+    desc: Run all pre-commit hooks (yamllint, shellcheck, hadolint, ruff) and a full gitleaks scan
+    cmds:
+      - scripts/check-deps.sh --lint
+      - pre-commit run --all-files
+      # The pre-commit gitleaks hook only sees staged changes; also scan the full git history.
+      - gitleaks git --redact --no-banner
+
+  test:
+    desc: Run the mcp-lab unit tests (pytest, no cluster needed)
+    dir: app
+    cmds:
+      - uv run --frozen pytest -q
+
+  build:
+    desc: Build the mcp-lab image (server and client) and import it into the k3d cluster
+    cmds:
+      - mkdir -p .tmp
+      - "{{.container_cli}} build -t {{.app_image}} app"
+      - "{{.container_cli}} save -o .tmp/mcp-lab.tar {{.app_image}}"
+      - k3d image import .tmp/mcp-lab.tar -c {{.cluster_name}}
+      - rm -f .tmp/mcp-lab.tar
+
+  test:all:
+    desc: Unit tests plus live acceptance checks on the running lab
+    cmds:
+      - task: test
+
+  test:ci:
+    desc: CI pipeline - lint and unit tests; with E2E=true also builds the lab and runs test:all
+    cmds:
+      - task: lint
+      - task: test
+      - |
+        if [ "${E2E:-false}" = "true" ]; then
+          task all && task test:all
+        else
+          echo "E2E not requested (set E2E=true to build the lab and run test:all)"
+        fi
+
+  clean:
+    desc: Delete the k3d cluster, Vault init data and temporary files
+    prompt: This deletes the cluster and vault-init.json. Continue?
+    cmds:
+      - k3d cluster delete {{.cluster_name}} || true
+      - rm -f vault-init.json .env.bak
+      - rm -rf .tmp/* app/.pytest_cache app/.ruff_cache
+
+  up:
+    desc: Build the whole lab from scratch (alias of all)
+    cmds:
+      - task: all
+
+  down:
+    desc: Stop the k3d cluster, keeping its data (alias of cluster:stop)
+    cmds:
+      - task: cluster:stop
+
+  all:
+    desc: prerequisites -> cluster -> Vault -> config -> deploy -> verify
+    cmds:
+      - task: deps
+
+  cluster:stop:
+    desc: Stop the k3d cluster (data kept; run unseal:vault after cluster:up)
+    cmds:
+      - k3d cluster stop {{.cluster_name}}

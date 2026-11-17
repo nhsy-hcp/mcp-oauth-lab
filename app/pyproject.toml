@@ -1,0 +1,40 @@
+[project]
+name = "mcp-lab"
+version = "0.1.0"
+description = "Orders MCP server and client: Vault CE as identity broker (Kubernetes auth -> Vault identity JWT) and dynamic PostgreSQL credentials via a Vault Proxy UNIX socket"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mcp>=2.3,<3",
+    "pyjwt[crypto]>=2.10",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+]
+
+[project.scripts]
+mcp-orders-server = "mcp_lab.server:main"
+mcp-orders-client = "mcp_lab.client:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 200
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]

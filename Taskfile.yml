@@ -20,6 +20,8 @@ vars:
   db_max_ttl: 30m
   token_ttl: 15m
   token_max_ttl: 30m
+  # Laptop port for the MCP server (127.0.0.1 only -> NodePort 30800). Fixed at cluster create time.
+  mcp_host_port: "8000"
   # Lifetime of the Vault identity JWT a client presents to the MCP server (set 1m for the expiry demo)
   mcp_token_ttl: 5m
 
@@ -115,12 +117,111 @@ tasks:
     cmds:
       - task: cluster:stop
 
+  # ==========================================================================
+  # Workflow
+  # ==========================================================================
   all:
     desc: prerequisites -> cluster -> Vault -> config -> deploy -> verify
     cmds:
       - task: deps
+      - task: cluster:up
+      - task: install
+      - task: install:postgres
+      - task: config:db-secret
+
+  install:
+    desc: Install, initialise, unseal and configure Vault
+    cmds:
+      - task: install:vault
+      - task: init:vault
+      - task: unseal:vault
+      - task: config:vault
+
+  # ==========================================================================
+  # Cluster
+  # ==========================================================================
+  cluster:up:
+    desc: Create or start the k3d cluster (Vault on localhost:8200, MCP on 127.0.0.1:mcp_host_port)
+    aliases: [start, k3d]
+    cmds:
+      - scripts/cluster-up.sh {{.cluster_name}} {{.k3s_image}} {{.mcp_host_port}}
+      - scripts/cluster-ready.sh {{.cluster_name}}
 
   cluster:stop:
     desc: Stop the k3d cluster (data kept; run unseal:vault after cluster:up)
     cmds:
       - k3d cluster stop {{.cluster_name}}
+
+  cluster:down:
+    desc: Delete the k3d cluster
+    cmds:
+      - k3d cluster delete {{.cluster_name}} || true
+
+  # ==========================================================================
+  # Vault
+  # ==========================================================================
+  install:vault:
+    desc: Helm install Vault CE (single-node Raft, NodePort 30820)
+    preconditions:
+      - sh: kubectl config current-context | grep -q '^k3d-{{.cluster_name}}$'
+        msg: kubectl context is not k3d-{{.cluster_name}} - run task cluster:up
+    cmds:
+      - kubectl create namespace vault --dry-run=client -o yaml | kubectl apply -f -
+      - >-
+        helm upgrade --install vault hashicorp/vault
+        --version {{.vault_chart_version}} -n vault
+        --values vault-ce/vault-values.yaml
+        --set server.image.repository={{.vault_image}}
+        --set server.image.tag={{.vault_version_tag}}
+      - |
+        for i in $(seq 1 30); do
+          kubectl get pod vault-0 -n vault >/dev/null 2>&1 && break
+          sleep 2
+        done
+      - kubectl wait --for=jsonpath='{.status.phase}'=Running pod/vault-0 -n vault --timeout=5m
+
+  init:vault:
+    desc: Initialise Vault once; writes vault-init.json and .env
+    cmds:
+      - scripts/init-vault.sh
+
+  unseal:vault:
+    desc: Unseal Vault with 3 keys from vault-init.json
+    preconditions:
+      - test -f vault-init.json
+    cmds:
+      - scripts/unseal-vault.sh
+
+  config:vault:
+    desc: Audit device to stdout, token reviewer SA and SA-reader RBAC
+    preconditions:
+      - test -f vault-init.json
+    cmds:
+      - scripts/config-vault.sh
+
+  # ==========================================================================
+  # PostgreSQL and database secrets engine
+  # ==========================================================================
+  install:postgres:
+    desc: Deploy PostgreSQL 16 with bootstrap SQL (preview database, orders and payments schemas, group role)
+    cmds:
+      - scripts/install-postgres.sh
+
+  config:db-secret:
+    desc: Database secrets engine at database/, pg-preview connection, preview-orders role, rotate-root
+    preconditions:
+      - test -f vault-init.json
+    cmds:
+      - scripts/config-db-secret.sh {{.db_default_ttl}} {{.db_max_ttl}}
+
+  clean:leases:
+    desc: Revoke every dynamic database lease (break-glass)
+    preconditions:
+      - test -f vault-init.json
+    cmds:
+      - scripts/vault.sh lease revoke -prefix database/creds/
+
+  logs:vault:
+    desc: Follow Vault's audit and server log
+    cmds:
+      - kubectl logs -f vault-0 -n vault

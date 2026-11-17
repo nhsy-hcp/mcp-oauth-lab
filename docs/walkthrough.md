@@ -30,12 +30,18 @@ TOKEN=$(task mcp:token)
 cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+' | base64 -d 2>/dev/null; echo   # iss, aud=mcp-orders, groups, exp
 ```
 
-Call a tool with the MCP Inspector CLI. Its flags vary by version; `curl` in the README always works. The
-Inspector only takes the header as an argument, so the token is visible in `ps` for the run; the README `curl` and
-`headersHelper` keep it on stdin.
+Open the MCP Inspector web UI with `task mcp:inspector`. It writes a read-only Inspector config
+(`.tmp/mcp-inspector.json`, mode 600, deleted on exit) with the `orders` server and an `Authorization: Bearer`
+header, so you only click Connect. Skip the Inspector's OAuth flow: this lab has no authorization server. The token
+lasts 5 minutes; when calls return 401, run `task mcp:inspector:refresh` in another terminal and reconnect.
+
+Or call a tool with the Inspector CLI. Its flags vary by version (this is v2); `curl` in the README always works.
+The CLI only takes the header as an argument, so the token is visible in `ps` for the run; the README `curl`,
+`task mcp:inspector` and `headersHelper` keep it out of argv.
 
 ```bash
-npx @modelcontextprotocol/inspector --cli http://localhost:8000/mcp --transport http \
+V=$(sed -n 's/^  inspector_version: "\(.*\)"$/\1/p' Taskfile.yml)   # the version task mcp:inspector uses
+npx "@modelcontextprotocol/inspector@$V" --cli http://localhost:8000/mcp --transport http \
   --header "Authorization: Bearer $TOKEN" --method tools/call --tool-name list_orders --tool-arg status=pending
 ```
 

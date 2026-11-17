@@ -55,6 +55,8 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
 | `task test` | Runs the unit tests (no cluster) |
 | `task test:all` | Unit tests plus `demo:mcp` (M1-M8) and `demo:mcp-auth` (A1-A12) on the running lab |
 | `task mcp:token` | Prints a 5-minute Vault identity JWT for the laptop client |
+| `task mcp:inspector` | Opens the MCP Inspector web UI with the `Authorization` header pre-set; `mcp:inspector:refresh` renews the JWT |
+| `task ui` | Copies the Vault root token to the clipboard (`task token`) and opens the Vault UI |
 | `task docs:diagrams` | Renders `docs/diagrams/*.py` to `docs/images/*.png` (needs Graphviz) |
 | `task test:ci` | Lint and unit tests; with `E2E=true`, also builds the lab and runs `test:all` |
 | `task clean` | Deletes the cluster, `vault-init.json` and temporary files |

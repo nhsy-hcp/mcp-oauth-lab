@@ -28,7 +28,8 @@ task mcp:token | sed 's/^/Authorization: Bearer /' | curl -s -X POST localhost:8
 ```
 
 Claude Code picks up `.mcp.json` from the project root. Approve the `orders` server once; it fetches a fresh token
-through `scripts/mcp-headers.sh`.
+through `scripts/mcp-headers.sh`. For the MCP Inspector web UI (header pre-set), run `task mcp:inspector`; for
+the Vault UI, run `task ui` (the root token is copied to the clipboard).
 
 Requirements: Docker or Podman, k3d, kubectl, helm, the vault CLI, jq, uv and task. Port `127.0.0.1:8000` must be
 free; otherwise run `task all mcp_host_port=<port>`. Check with `task deps`.

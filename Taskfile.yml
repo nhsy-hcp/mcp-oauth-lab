@@ -13,6 +13,8 @@ vars:
   vault_version_tag: "2.2.2"
   postgres_image: postgres:16-alpine
   app_image: localhost/mcp-lab:local
+  # MCP Inspector (npx) for task mcp:inspector; v2 needs Node >= 22.19
+  inspector_version: "2.13.0"
   container_cli:
     sh: command -v podman >/dev/null 2>&1 && echo podman || echo docker
   # TTLs: db max_ttl must never exceed token_max_ttl (leases are children of the Proxy token)
@@ -275,6 +277,44 @@ tasks:
     silent: true
     cmds:
       - scripts/mcp-token.sh
+
+  mcp:inspector:
+    desc: Open the MCP Inspector web UI on the MCP server, Authorization header pre-set with a fresh 5-minute JWT
+    preconditions:
+      - sh: command -v npx >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=19)?0:1)'
+        msg: "mcp:inspector needs npx and Node >= 22.19 (Inspector v2)"
+    cmds:
+      - scripts/mcp-inspector.sh {{.inspector_version}} http://localhost:{{.mcp_host_port}}/mcp
+
+  mcp:inspector:refresh:
+    desc: Write a new 5-minute JWT for the running mcp:inspector (then reconnect in the UI)
+    cmds:
+      - scripts/mcp-inspector.sh --refresh
+
+  # ==========================================================================
+  # Vault UI (root token, demo only; macOS: pbcopy and open)
+  # ==========================================================================
+  token:
+    desc: Copy the Vault root token to the clipboard (demo only, macOS)
+    preconditions:
+      - sh: '[ "$(uname -s)" = Darwin ]'
+        msg: "token uses pbcopy (macOS only); elsewhere read .root_token from vault-init.json"
+    cmds:
+      # root_token (scripts/lib.sh) reads vault-init.json and fails with a hint if it is missing.
+      # Check the value before pbcopy so a failure never empties the clipboard.
+      - |
+        tok="$(bash -c 'source scripts/lib.sh && root_token')"
+        case "${tok}" in
+          "" | null) echo "ERROR: no root_token in vault-init.json" >&2; exit 1 ;;
+        esac
+        printf '%s' "${tok}" | pbcopy
+        echo "Vault root token copied to the clipboard"
+
+  ui:
+    desc: Copy the root token and open the Vault UI (macOS)
+    cmds:
+      - task: token
+      - open "${VAULT_ADDR:-http://127.0.0.1:8200}/ui"
 
   # ==========================================================================
   # Demo scenarios (docs/walkthrough.md)

@@ -24,7 +24,8 @@ accessor="$(auth_accessor)"
 
 # --- 1. Identity tokens --------------------------------------------------------------------------
 # Every token's iss is <issuer>/v1/identity/oidc; the in-cluster address is what the MCP server checks.
-vault_cmd write identity/oidc/config issuer="${ISSUER}" >/dev/null
+# (Vault warns that an explicit issuer must be used for validation everywhere - that is the point here.)
+vault_cmd write identity/oidc/config issuer="${ISSUER}" >/dev/null 2>&1 || { err "could not set identity/oidc/config issuer"; exit 1; }
 # verification_ttl keeps a rotated-out public key in the JWKS long enough for tokens it signed to expire.
 vault_cmd write identity/oidc/key/mcp algorithm=RS256 rotation_period=24h verification_ttl=24h allowed_client_ids="${AUDIENCE}" >/dev/null
 sed "s/__ACCESSOR__/${accessor}/g" vault-ce/mcp-auth/mcp-orders-claims.json.tpl \

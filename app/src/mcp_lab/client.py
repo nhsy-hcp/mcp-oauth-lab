@@ -93,18 +93,26 @@ def _summary(result: Any) -> dict[str, Any]:
 
 
 async def run_once(config: ClientConfig, auth: httpx2.Auth) -> None:
+    last_status: dict[str, int] = {}
+
+    async def record_status(response: httpx2.Response) -> None:
+        # The SDK turns an HTTP 401 into a generic MCPError; keep the status for the log line.
+        last_status["code"] = response.status_code
+
     try:
-        async with create_mcp_http_client(auth=auth) as http_client, Client(streamable_http_client(config.mcp_url, http_client=http_client)) as client:
-            listed = await client.list_tools()
-            log_event(log, logging.INFO, "tools_listed", tools=sorted(t.name for t in listed.tools))
-            for name in config.tools:
-                result = await client.call_tool(name, TOOL_ARGS.get(name, {}))
-                log_event(log, logging.WARNING if result.is_error else logging.INFO, "tool_called", tool=name, **_summary(result))
+        async with create_mcp_http_client(auth=auth) as http_client:
+            http_client.event_hooks["response"].append(record_status)
+            async with Client(streamable_http_client(config.mcp_url, http_client=http_client)) as client:
+                listed = await client.list_tools()
+                log_event(log, logging.INFO, "tools_listed", tools=sorted(t.name for t in listed.tools))
+                for name in config.tools:
+                    result = await client.call_tool(name, TOOL_ARGS.get(name, {}))
+                    log_event(log, logging.WARNING if result.is_error else logging.INFO, "tool_called", tool=name, **_summary(result))
     except TokenUnavailable as exc:
         log_event(log, logging.WARNING, "mcp_call_failed", error="token_unavailable", status=exc.status)
     except Exception as exc:
         cause = _root_cause(exc)
-        status = getattr(getattr(cause, "response", None), "status_code", None)
+        status = getattr(getattr(cause, "response", None), "status_code", None) or last_status.get("code")
         log_event(log, logging.WARNING, "mcp_call_failed", error=type(cause).__name__, status=status, detail=str(cause)[:200])
 
 

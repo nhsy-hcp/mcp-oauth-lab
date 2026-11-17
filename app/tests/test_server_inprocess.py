@@ -12,12 +12,11 @@ from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server.transport_security import TransportSecuritySettings
 
+from conftest import AUDIENCE, ISSUER
 from mcp_lab.auth import VaultJwtVerifier
 from mcp_lab.client import VaultIdentityAuth
 from mcp_lab.config import ServerConfig
 from mcp_lab.server import build_mcp
-
-from .conftest import AUDIENCE, ISSUER
 
 URL = "http://localhost:8000/mcp"
 
@@ -118,3 +117,24 @@ def test_no_allowed_group_fails_closed(vault, creds, groups):
             return await http.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers={"Accept": "application/json, text/event-stream"})
 
     assert run(go).status_code == 401
+
+
+def test_client_run_once_logs_401_status_for_unlisted_identity(vault, creds, monkeypatch, caplog):
+    """Regression: the SDK wraps a 401 in a generic MCPError; the client must still log status=401."""
+    import logging
+
+    from mcp_lab import client as client_mod
+    from mcp_lab.config import ClientConfig
+
+    vault.groups = []  # valid Vault identity, no group -> server answers 401
+
+    async def go():
+        async with _server(vault, creds) as app:
+            monkeypatch.setattr(client_mod, "create_mcp_http_client", lambda auth=None: _http(app, auth=auth))
+            config = ClientConfig.from_env({"MCP_URL": URL, "CLIENT_TOOLS": "list_orders"})
+            await client_mod.run_once(config, VaultIdentityAuth(vault.read, "mcp-orders"))
+
+    with caplog.at_level(logging.WARNING, logger="mcp_lab.client"):
+        run(go)
+    failed = [r for r in caplog.records if r.getMessage() == "mcp_call_failed"]
+    assert failed and failed[-1].fields["status"] == 401

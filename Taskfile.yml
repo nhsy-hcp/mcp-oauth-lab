@@ -26,6 +26,8 @@ vars:
   mcp_token_ttl: 5m
   # How often each client pod calls the MCP server
   client_interval_seconds: "20"
+  # A6 (expiry) shortens the identity token TTL to this for one run, then restores mcp_token_ttl
+  demo_token_ttl: 1m
 
 dotenv:
   - .env
@@ -77,6 +79,7 @@ tasks:
 
   build:
     desc: Build the mcp-lab image (server and client) and import it into the k3d cluster
+    run: once # deploy:mcp-server and deploy:mcp-clients both need it; build it once per task run
     cmds:
       - mkdir -p .tmp
       - "{{.container_cli}} build -t {{.app_image}} app"
@@ -85,9 +88,11 @@ tasks:
       - rm -f .tmp/mcp-lab.tar
 
   test:all:
-    desc: Unit tests plus live acceptance checks on the running lab
+    desc: Unit tests plus live acceptance checks on the running lab (M1-M8, A1-A11)
     cmds:
       - task: test
+      - task: demo:mcp
+      - task: demo:mcp-auth
 
   test:ci:
     desc: CI pipeline - lint and unit tests; with E2E=true also builds the lab and runs test:all
@@ -259,6 +264,7 @@ tasks:
   deploy:mcp-clients:
     desc: Deploy the MCP client pods (orders-agent, reporting-agent, unlisted); the laptop client has no pod
     cmds:
+      - task: build
       - >-
         CLIENT_INTERVAL_SECONDS={{.client_interval_seconds}}
         scripts/deploy-workloads.sh vault-ce/mcp-clients.json mcp-client-deployment mcp-client mcp-client
@@ -269,6 +275,27 @@ tasks:
     silent: true
     cmds:
       - scripts/mcp-token.sh
+
+  # ==========================================================================
+  # Demo scenarios (docs/walkthrough.md)
+  # ==========================================================================
+  demo:mcp:
+    desc: M1-M8 - the MCP server's own short-lived, least-privileged database access
+    cmds:
+      - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp.sh
+
+  demo:mcp-auth:
+    desc: A1-A11 - Vault as identity broker - 401s, forged/expired tokens, group-based tools, central revoke, audit
+    cmds:
+      - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp-auth.sh {{.mcp_token_ttl}} {{.demo_token_ttl}} {{.token_ttl}} {{.token_max_ttl}}
+
+  status:
+    desc: Show cluster, Vault and workload status
+    silent: true
+    cmds:
+      - kubectl get nodes
+      - kubectl get pods -A -l 'app.kubernetes.io/name in (vault,postgres,mcp-orders,mcp-client)' 2>/dev/null || true
+      - vault status -address=http://127.0.0.1:8200 || true
 
   logs:
     desc: "Follow logs (NS=mcp-server-orders-preview|mcp-client-orders-agent|..., C=app|vault-proxy)"

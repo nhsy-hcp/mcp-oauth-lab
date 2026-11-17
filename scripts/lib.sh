@@ -68,3 +68,48 @@ auth_accessor() {
   [ -n "${accessor}" ] || { err "${AUTH_MOUNT} is not enabled - run task config:k8s-auth"; return 1; }
   printf '%s\n' "${accessor}"
 }
+
+# --- MCP helpers (demo scripts) --------------------------------------------------------------------
+MCP_URL="http://127.0.0.1:${MCP_HOST_PORT:-8000}/mcp"
+SERVER_NS="${SERVER_NS:-mcp-server-orders-preview}"
+
+pass() { printf '  PASS  %s\n' "$*"; }
+fail() { printf '  FAIL  %s\n' "$*" >&2; FAILURES=$((${FAILURES:-0} + 1)); }
+check() { # check <description> <command...>: PASS if the command succeeds
+  local desc="$1"
+  shift
+  if "$@"; then pass "${desc}"; else fail "${desc}"; fi
+}
+
+# POST one JSON-RPC request to the MCP server (stateless, JSON responses).
+# Usage: mcp_rpc <bearer-token|""> <method> [params-json]   -> prints "<http-status> <body>"
+mcp_rpc() {
+  local token="$1" method="$2" params="${3:-}" auth=()
+  [ -n "${params}" ] || params='{}'
+  [ -n "${token}" ] && auth=(-H "Authorization: Bearer ${token}")
+  curl -s -o /dev/stdout -w ' %{http_code}' -X POST "${MCP_URL}" "${auth[@]}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d "$(jq -cn --arg m "${method}" --argjson p "${params}" '{jsonrpc: "2.0", id: 1, method: $m, params: $p}')" \
+    | awk '{status=$NF; $NF=""; print status, $0}'
+}
+
+# Call a tool and print the JSON-RPC result (or nothing on HTTP error). Usage: mcp_tool <token> <tool> [args-json]
+mcp_tool() {
+  local out args="${3:-}"
+  [ -n "${args}" ] || args='{}'
+  out="$(mcp_rpc "$1" tools/call "$(jq -cn --arg n "$2" --argjson a "${args}" '{name: $n, arguments: $a}')")"
+  [ "${out%% *}" = 200 ] && printf '%s\n' "${out#* }" | jq -c '.result'
+}
+
+# vault read through a pod's own Proxy (its identity, its policy). Prints the HTTP-ish outcome: ok | denied | error
+# Usage: proxy_read <namespace> <deployment> <path>
+proxy_read() {
+  local out
+  if out="$(kubectl exec -n "$1" "deploy/$2" -c vault-proxy -- vault read -address=unix:///run/vault/proxy.sock -format=json "$3" 2>&1)"; then
+    echo ok
+  elif grep -q 'permission denied' <<<"${out}"; then
+    echo denied
+  else
+    echo error
+  fi
+}

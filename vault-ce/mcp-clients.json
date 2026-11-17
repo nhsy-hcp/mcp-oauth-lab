@@ -1,0 +1,38 @@
+[
+  {
+    "name": "mcp-client-orders-agent",
+    "application_name": "orders-agent",
+    "environment": "preview",
+    "team": "ai-platform",
+    "group": "mcp-orders-reader",
+    "pod": true,
+    "tools": "list_orders,get_order,whoami"
+  },
+  {
+    "name": "mcp-client-reporting-agent",
+    "application_name": "reporting-agent",
+    "environment": "preview",
+    "team": "finance",
+    "group": "mcp-orders-reporter",
+    "pod": true,
+    "tools": "list_orders,get_order"
+  },
+  {
+    "name": "mcp-client-laptop",
+    "application_name": "laptop",
+    "environment": "preview",
+    "team": "ai-platform",
+    "group": "mcp-orders-reader",
+    "pod": false,
+    "tools": ""
+  },
+  {
+    "name": "mcp-client-unlisted",
+    "application_name": "unlisted-agent",
+    "environment": "preview",
+    "team": "unknown",
+    "group": "",
+    "pod": true,
+    "tools": "list_orders"
+  }
+]

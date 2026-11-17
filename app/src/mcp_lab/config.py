@@ -1,0 +1,105 @@
+"""Configuration from environment variables. Every setting is non-secret."""
+
+from __future__ import annotations
+
+import math
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+DEFAULT_SOCKET = "/run/vault/proxy.sock"
+DEFAULT_ISSUER = "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc"
+DEFAULT_AUDIENCE = "mcp-orders"
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def _positive_seconds(env: Mapping[str, str], name: str, default: str) -> float:
+    """An interval: 0, negative or NaN would make a loop poll without pausing."""
+    value = float(env.get(name, default))
+    if not math.isfinite(value) or value <= 0:
+        raise ConfigError(f"{name} must be a positive number of seconds")
+    return value
+
+
+def _required(env: Mapping[str, str], name: str) -> str:
+    value = env.get(name, "").strip()
+    if not value:
+        raise ConfigError(f"{name} is required")
+    return value
+
+
+def _csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    """The orders MCP server: dynamic DB credentials via Proxy, Vault identity JWTs for callers."""
+
+    vault_socket: str
+    db_creds_path: str
+    db_host: str
+    db_name: str
+    db_port: int
+    issuer: str
+    audience: str
+    resource_url: str
+    allowed_hosts: tuple[str, ...]
+    log_level: str
+    port: int
+    creds_refresh_max_seconds: float = 60.0
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> ServerConfig:
+        env = os.environ if env is None else env
+        try:
+            return cls(
+                vault_socket=env.get("VAULT_SOCKET", DEFAULT_SOCKET),
+                db_creds_path=_required(env, "DB_CREDS_PATH").strip("/"),
+                db_host=_required(env, "DB_HOST"),
+                db_name=_required(env, "DB_NAME"),
+                db_port=int(env.get("DB_PORT", "5432")),
+                issuer=env.get("MCP_ISSUER", DEFAULT_ISSUER).strip(),
+                audience=env.get("MCP_AUDIENCE", DEFAULT_AUDIENCE).strip(),
+                resource_url=env.get("MCP_RESOURCE_URL", "http://localhost:8000/mcp").strip(),
+                allowed_hosts=_csv(env.get("MCP_ALLOWED_HOSTS", "localhost:8000,127.0.0.1:8000")),
+                log_level=env.get("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+                port=int(env.get("PORT", "8080")),
+                creds_refresh_max_seconds=_positive_seconds(env, "CREDS_REFRESH_MAX_SECONDS", "60"),
+            )
+        except ValueError as exc:
+            if isinstance(exc, ConfigError):
+                raise
+            raise ConfigError(str(exc)) from exc
+
+
+@dataclass(frozen=True)
+class ClientConfig:
+    """An MCP client pod: mints a Vault identity JWT over its Proxy socket and calls the server."""
+
+    vault_socket: str
+    mcp_url: str
+    token_role: str
+    tools: tuple[str, ...]
+    interval_seconds: float
+    log_level: str
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> ClientConfig:
+        env = os.environ if env is None else env
+        try:
+            return cls(
+                vault_socket=env.get("VAULT_SOCKET", DEFAULT_SOCKET),
+                mcp_url=_required(env, "MCP_URL"),
+                token_role=env.get("MCP_TOKEN_ROLE", DEFAULT_AUDIENCE).strip(),
+                tools=_csv(env.get("CLIENT_TOOLS", "list_orders,get_order,whoami")),
+                interval_seconds=_positive_seconds(env, "CLIENT_INTERVAL_SECONDS", "30"),
+                log_level=env.get("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+            )
+        except ValueError as exc:
+            if isinstance(exc, ConfigError):
+                raise
+            raise ConfigError(str(exc)) from exc

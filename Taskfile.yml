@@ -128,6 +128,8 @@ tasks:
       - task: install
       - task: install:postgres
       - task: config:db-secret
+      - task: config:k8s-auth
+      - task: deploy:mcp-server
 
   install:
     desc: Install, initialise, unseal and configure Vault
@@ -220,6 +222,30 @@ tasks:
       - test -f vault-init.json
     cmds:
       - scripts/vault.sh lease revoke -prefix database/creds/
+
+  # ==========================================================================
+  # MCP server identity (auth/kubernetes) and deployment
+  # ==========================================================================
+  config:k8s-auth:
+    desc: auth/kubernetes (annotations as alias metadata), templated mcp-server policy and role
+    preconditions:
+      - test -f vault-init.json
+    cmds:
+      - scripts/config-k8s-auth.sh {{.token_ttl}} {{.token_max_ttl}}
+
+  deploy:mcp-server:
+    desc: Build/import the image and deploy the orders MCP server (http://localhost:{{.mcp_host_port}}/mcp)
+    cmds:
+      - task: build
+      - >-
+        MCP_HOST_PORT={{.mcp_host_port}}
+        scripts/deploy-workloads.sh vault-ce/servers.json mcp-server-deployment mcp-orders mcp-server
+        {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
+
+  logs:
+    desc: "Follow logs (NS=mcp-server-orders-preview|mcp-client-orders-agent|..., C=app|vault-proxy)"
+    cmds:
+      - kubectl logs -f -n {{.NS | default "mcp-server-orders-preview"}} -l 'app.kubernetes.io/name in (mcp-orders,mcp-client)' -c {{.C | default "app"}}
 
   logs:vault:
     desc: Follow Vault's audit and server log

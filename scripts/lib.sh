@@ -10,7 +10,9 @@ set -euo pipefail
 VAULT_NS="${VAULT_NS:-vault}"
 VAULT_POD="${VAULT_POD:-vault-0}"
 INIT_FILE="${INIT_FILE:-vault-init.json}"
-APPS_FILE="${APPS_FILE:-vault-ce/apps.json}"
+SERVERS_FILE="${SERVERS_FILE:-vault-ce/servers.json}"
+CLIENTS_FILE="${CLIENTS_FILE:-vault-ce/mcp-clients.json}"
+AUTH_MOUNT="auth/kubernetes"
 
 log() { printf '==> %s\n' "$*"; }
 err() { printf 'ERROR: %s\n' "$*" >&2; }
@@ -59,11 +61,10 @@ pg_role_count() {
     "SELECT count(*) FROM pg_roles WHERE rolname = '$1'"
 }
 
-# Names of every app instance in apps.json (one per line)
-app_names() { jq -r '.[].name' "${APPS_FILE}"; }
-
-# GET an app endpoint through the API server's service proxy (no port-forward needed).
-# Usage: app_get <app-name> <path-with-query>
-app_get() {
-  kubectl get --raw "/api/v1/namespaces/${1}/services/db-app:http/proxy/${2#/}"
+# Accessor of auth/kubernetes (alias metadata in templates is addressed by accessor). Needs VAULT_TOKEN.
+auth_accessor() {
+  local accessor
+  accessor="$(vault_cmd auth list -format=json | jq -r --arg m "${AUTH_MOUNT#auth/}/" '.[$m].accessor // empty')"
+  [ -n "${accessor}" ] || { err "${AUTH_MOUNT} is not enabled - run task config:k8s-auth"; return 1; }
+  printf '%s\n' "${accessor}"
 }

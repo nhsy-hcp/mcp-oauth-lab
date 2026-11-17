@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import anyio
@@ -21,7 +22,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mcp_lab import tools
-from mcp_lab.auth import VaultJwtVerifier, require
+from mcp_lab.auth import GroupToolsError, VaultJwtVerifier, check_group_tools, packaged_group_tools, require
 from mcp_lab.config import ConfigError, ServerConfig
 from mcp_lab.creds import CredentialManager
 from mcp_lab.logging_setup import configure_logging, log_event
@@ -44,28 +45,38 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
             validate_token_resource=False,
         ),
     )
+    registered: set[str] = set()
 
-    @mcp.tool()
+    def tool(**kwargs: Any) -> Callable[[Callable[..., Any]], Any]:
+        """``mcp.tool`` that also records the name, so the group map can be checked against what is served."""
+
+        def register(fn: Callable[..., Any]) -> Any:
+            registered.add(kwargs.get("name") or fn.__name__)
+            return mcp.tool(**kwargs)(fn)
+
+        return register
+
+    @tool()
     def list_orders(status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         """List preview orders, optionally filtered by status (pending, shipped, cancelled). At most 50 rows."""
         require("list_orders")
         return tools.list_orders(creds, status, limit)
 
-    @mcp.tool()
+    @tool()
     def get_order(order_id: int) -> dict[str, Any] | None:
         """Get one preview order by id."""
         require("get_order")
         return tools.get_order(creds, order_id)
 
     # Listed so clients see it is refused; annotated destructive so a model client treats it with care
-    @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True), structured_output=False)
+    @tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True), structured_output=False)
     def delete_order(order_id: int) -> None:
         """Delete one preview order. Always denied: no Vault group is granted it, and orders are read-only."""
-        require("delete_order")  # no GROUP_TOOLS entry grants delete_order, so this raises for every caller
+        require("delete_order")  # no group in group_tools.toml grants delete_order, so this raises for every caller
         # Defence in depth if a group is ever granted it: there is no DELETE path, and the DB grant is SELECT only.
         raise ToolError(f"permission denied: delete_order is not supported (order {int(order_id)} untouched; orders are read-only)")
 
-    @mcp.tool()
+    @tool()
     def whoami() -> dict[str, Any]:
         """The calling client's Vault identity and the database user this server is using (never a password)."""
         token = require("whoami")
@@ -80,6 +91,7 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
         ok = creds.is_healthy()  # type: ignore[attr-defined]
         return JSONResponse({"ok": ok}, status_code=200 if ok else 503)
 
+    check_group_tools(verifier.group_tools, registered)
     return mcp
 
 
@@ -106,8 +118,12 @@ async def serve(config: ServerConfig) -> None:
         dbname=config.db_name,
         max_refresh_seconds=config.creds_refresh_max_seconds,
     )
-    verifier = VaultJwtVerifier(vault.read, issuer=config.issuer, audience=config.audience)
-    mcp = build_mcp(config, creds, verifier)
+    try:
+        verifier = VaultJwtVerifier(vault.read, issuer=config.issuer, audience=config.audience, group_tools=packaged_group_tools())
+        mcp = build_mcp(config, creds, verifier)
+    except GroupToolsError as exc:
+        log_event(log, logging.ERROR, "group_tools_invalid", error=str(exc))
+        raise SystemExit(2) from exc
     creds.start()
     try:
         log_event(log, logging.INFO, "listening", port=config.port, issuer=config.issuer, audience=config.audience)

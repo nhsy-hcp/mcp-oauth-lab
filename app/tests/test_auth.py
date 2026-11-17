@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -9,7 +10,9 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from conftest import AUDIENCE, ISSUER
-from mcp_lab.auth import GROUP_TOOLS, MIN_REFRESH_SECONDS, VaultJwtVerifier, tools_for_groups
+from mcp_lab.auth import MIN_REFRESH_SECONDS, GroupToolsError, VaultJwtVerifier, check_group_tools, load_group_tools, packaged_group_tools, tools_for_groups
+
+GROUP_TOOLS = packaged_group_tools()
 
 
 class Clock:
@@ -156,3 +159,56 @@ def test_no_group_grants_delete_order():
 
 def test_tools_for_groups_ignores_non_strings():
     assert tools_for_groups(["mcp-orders-reporter", 7, None]) == frozenset({"list_orders"})
+
+
+def test_packaged_group_tools_file():
+    assert dict(GROUP_TOOLS) == {
+        "mcp-orders-reader": frozenset({"list_orders", "get_order", "whoami"}),
+        "mcp-orders-reporter": frozenset({"list_orders"}),
+    }
+
+
+def test_group_tools_is_read_only():
+    with pytest.raises(TypeError):
+        GROUP_TOOLS["mcp-orders-admin"] = frozenset({"delete_order"})  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ("not = [toml", "group_tools.toml"),
+        ("", "non-empty [groups] table"),
+        ("groups = 1", "non-empty [groups] table"),
+        ("[groups]", "non-empty [groups] table"),
+        ("[groups.reader]\ntools = ['list_orders']", "must map to a list"),
+        ('[groups]\nreader = ["list_orders", "list_orders"]', "lists a tool twice"),
+        ('[groups]\nreader = [" list_orders"]', "surrounding spaces"),
+        ('[groups]\n" reader" = ["list_orders"]', "group name"),
+        ('[groups]\nreader = "list_orders"', "must map to a list"),
+        ("[groups]\nreader = [1]", "non-empty string"),
+        ('[groups]\nreader = [" "]', "non-empty string"),
+        ('[groups]\n"" = ["list_orders"]', "group name"),
+    ],
+)
+def test_load_group_tools_rejects_bad_files(text, error):
+    with pytest.raises(GroupToolsError, match=re.escape(error)):
+        load_group_tools(text)
+
+
+def test_load_group_tools_empty_list_grants_nothing():
+    assert load_group_tools("[groups]\nreader = []") == {"reader": frozenset()}
+
+
+def test_check_group_tools_rejects_unknown_tool():
+    with pytest.raises(GroupToolsError, match="unknown tool"):
+        check_group_tools({"reader": frozenset({"list_order"})}, {"list_orders"})
+    check_group_tools({"reader": frozenset({"list_orders"})}, {"list_orders", "whoami"})
+
+
+def test_check_group_tools_rejects_delete_order_even_though_registered():
+    with pytest.raises(GroupToolsError, match="never be granted: delete_order"):
+        check_group_tools({"admin": frozenset({"delete_order", "list_orders"})}, {"delete_order", "list_orders"})
+
+
+def test_packaged_group_tools_pass_the_startup_check():
+    check_group_tools(GROUP_TOOLS, {"list_orders", "get_order", "delete_order", "whoami"})

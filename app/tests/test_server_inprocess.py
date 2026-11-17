@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 
 import anyio
 import httpx2
@@ -13,7 +14,8 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.server.transport_security import TransportSecuritySettings
 
 from conftest import AUDIENCE, ISSUER
-from mcp_lab.auth import VaultJwtVerifier
+from mcp_lab import server
+from mcp_lab.auth import GroupToolsError, VaultJwtVerifier
 from mcp_lab.client import VaultIdentityAuth
 from mcp_lab.config import ServerConfig
 from mcp_lab.server import build_mcp
@@ -112,8 +114,9 @@ def test_delete_order_is_denied_for_every_group(vault, creds, groups):
     assert creds.queries == []
 
 
-def test_delete_order_denied_even_if_a_group_were_granted_it(vault, creds):
-    # Defence in depth: a future GROUP_TOOLS mistake still cannot delete anything
+def test_delete_order_denied_even_if_a_group_were_granted_it(vault, creds, monkeypatch):
+    # Defence in depth: even if the startup check were bypassed, a group granted delete_order still cannot delete anything
+    monkeypatch.setattr(server, "check_group_tools", lambda *_: None)
     granted = {"mcp-orders-reader": frozenset({"delete_order", "list_orders", "get_order", "whoami"})}
 
     async def go():
@@ -178,3 +181,35 @@ def test_client_run_once_logs_401_status_for_unlisted_identity(vault, creds, mon
         run(go)
     failed = [r for r in caplog.records if r.getMessage() == "mcp_call_failed"]
     assert failed and failed[-1].fields["status"] == 401
+
+
+def test_build_mcp_rejects_unknown_tool_in_group_map(vault, creds):
+    # A typo in group_tools.toml must stop startup, not silently deny the tool
+    bad = VaultJwtVerifier(vault.read, ISSUER, AUDIENCE, group_tools={"mcp-orders-reader": frozenset({"list_order"})})
+    with pytest.raises(GroupToolsError, match="unknown tool"):
+        build_mcp(_config(), creds, bad)
+
+
+def test_build_mcp_rejects_a_map_granting_delete_order(vault, creds):
+    bad = VaultJwtVerifier(vault.read, ISSUER, AUDIENCE, group_tools={"mcp-orders-reader": frozenset({"delete_order"})})
+    with pytest.raises(GroupToolsError, match="never be granted"):
+        build_mcp(_config(), creds, bad)
+
+
+def test_serve_exits_2_and_logs_when_group_tools_is_invalid(vault, monkeypatch, caplog):
+    class Proxy:
+        def __init__(self, _socket):
+            self.read = vault.read
+
+        def wait_for_socket(self):
+            return True
+
+    def broken():
+        raise GroupToolsError("group_tools.toml: broken")
+
+    monkeypatch.setattr(server, "VaultClient", Proxy)
+    monkeypatch.setattr(server, "packaged_group_tools", broken)
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exit_info:
+        run(server.serve, _config())
+    assert exit_info.value.code == 2
+    assert [r.getMessage() for r in caplog.records] == ["group_tools_invalid"]

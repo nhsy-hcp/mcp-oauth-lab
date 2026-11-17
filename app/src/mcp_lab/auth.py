@@ -6,19 +6,24 @@ Vault is the identity broker: a client logs in with its Kubernetes ServiceAccoun
 * signature against Vault's JWKS (``identity/oidc/.well-known/keys``), read through the server's own
   Vault Proxy socket - so the MCP pod needs no network path to Vault and holds no Vault credential;
 * ``RS256`` only, ``iss``, ``aud``, ``exp`` and ``iat`` required;
-* the ``groups`` claim (from ``{{identity.entity.groups.names}}``) mapped through :data:`GROUP_TOOLS`.
+* the ``groups`` claim (from ``{{identity.entity.groups.names}}``) mapped through ``group_tools.toml``,
+  shipped inside this package and read by :func:`packaged_group_tools`.
 
-Who is in a group is decided in Vault (``identity/group``); what a group may call is this versioned
-map. ServiceAccount annotations only feed informational claims and never grant a tool. A token
+Who is in a group is decided in Vault (``identity/group``); what a group may call is that versioned
+file, baked into the image. ServiceAccount annotations only feed informational claims and never grant a tool. A token
 with no known group fails closed (401). The token itself is never logged or forwarded.
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+import tomllib
+from collections.abc import Callable, Iterable, Mapping
+from importlib import resources
+from types import MappingProxyType
 from typing import Any
 
 import anyio
@@ -33,11 +38,61 @@ log = logging.getLogger(__name__)
 
 JWKS_PATH = "identity/oidc/.well-known/keys"
 ALGORITHMS = ["RS256"]
-# Vault group -> tools it may call. Membership lives in Vault; the tool set is reviewed in code.
-GROUP_TOOLS: Mapping[str, frozenset[str]] = {
-    "mcp-orders-reader": frozenset({"list_orders", "get_order", "whoami"}),
-    "mcp-orders-reporter": frozenset({"list_orders"}),
-}
+GROUP_TOOLS_FILE = "group_tools.toml"
+# Tools no group may ever be granted, whatever the file says. delete_order also refuses on its own.
+NEVER_GRANTED = frozenset({"delete_order"})
+
+
+class GroupToolsError(ValueError):
+    """``group_tools.toml`` is unreadable, malformed, or grants a tool it must not."""
+
+
+def _name(value: Any, what: str) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: {what} must be a non-empty string without surrounding spaces, got {value!r}")
+    return value
+
+
+def load_group_tools(text: str | None = None) -> Mapping[str, frozenset[str]]:
+    """Parse the group -> tools map (the packaged file unless ``text`` is given). Raises :class:`GroupToolsError`."""
+    try:
+        if text is None:
+            text = resources.files("mcp_lab").joinpath(GROUP_TOOLS_FILE).read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: {exc}") from exc
+    groups = data.get("groups")
+    if not isinstance(groups, dict) or not groups:
+        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: a non-empty [groups] table is required")
+    result: dict[str, frozenset[str]] = {}
+    for group, tools in groups.items():
+        _name(group, "group name")
+        if not isinstance(tools, list):
+            raise GroupToolsError(f"{GROUP_TOOLS_FILE}: group {group!r} must map to a list of tool names")
+        names = [_name(tool, f"tool in group {group!r}") for tool in tools]
+        if len(set(names)) != len(names):
+            raise GroupToolsError(f"{GROUP_TOOLS_FILE}: group {group!r} lists a tool twice")
+        result[group] = frozenset(names)
+    return MappingProxyType(result)
+
+
+@functools.cache
+def packaged_group_tools() -> Mapping[str, frozenset[str]]:
+    """Vault group -> tools it may call, from the packaged file. Membership lives in Vault; the tool set is reviewed here."""
+    return load_group_tools()
+
+
+def check_group_tools(group_tools: Mapping[str, frozenset[str]], registered: Iterable[str]) -> None:
+    """Fail closed at startup if the map grants a forbidden tool, or one the server does not register (a typo would silently deny)."""
+    granted = set().union(*group_tools.values())
+    forbidden = sorted(granted & NEVER_GRANTED)
+    if forbidden:
+        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: tool(s) must never be granted: {', '.join(forbidden)}")
+    unknown = sorted(granted - set(registered))
+    if unknown:
+        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: unknown tool(s) {', '.join(unknown)}")
+
+
 # Never fetch JWKS more often than this, whether the last attempt worked or not: a stream of forged kids,
 # or Vault being down, must not hammer Vault or queue requests behind a slow fetch.
 MIN_REFRESH_SECONDS = 10.0
@@ -50,7 +105,9 @@ class JwksUnavailable(Exception):
     pass
 
 
-def tools_for_groups(groups: Any, group_tools: Mapping[str, frozenset[str]] = GROUP_TOOLS) -> frozenset[str]:
+def tools_for_groups(groups: Any, group_tools: Mapping[str, frozenset[str]] | None = None) -> frozenset[str]:
+    if group_tools is None:
+        group_tools = packaged_group_tools()
     if not isinstance(groups, list):
         return frozenset()
     allowed: set[str] = set()
@@ -68,13 +125,13 @@ class VaultJwtVerifier:
         vault_read: VaultRead,
         issuer: str,
         audience: str,
-        group_tools: Mapping[str, frozenset[str]] = GROUP_TOOLS,
+        group_tools: Mapping[str, frozenset[str]] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._read = vault_read
         self.issuer = issuer
         self.audience = audience
-        self.group_tools = group_tools
+        self.group_tools = packaged_group_tools() if group_tools is None else group_tools
         self._clock = clock
         self._jwks: jwt.PyJWKSet | None = None
         self._attempted_at = float("-inf")

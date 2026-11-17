@@ -114,7 +114,9 @@ A token looks like this:
    - Looks up the `kid` in the JWKS, read through the server's own Proxy and cached. An unknown `kid` triggers at
      most one refetch every 10 seconds, so forged kids can't flood Vault.
    - Requires `iss`, `aud`, `exp`, `iat` and `sub`.
-   - Maps `groups` through a fixed table in code, `GROUP_TOOLS`. No known group gives `401`.
+   - Maps `groups` through `app/src/mcp_lab/group_tools.toml`, which ships inside the image, so changing it needs a
+     reviewed commit and a rebuild. No known group gives `401`. The server refuses to start if the file is malformed,
+     names a tool it does not register, or grants `delete_order`.
 5. Every tool calls `require(<tool>)` first. A tool outside the caller's groups returns an MCP tool error. The
    client's token is never forwarded anywhere.
 

@@ -26,8 +26,8 @@ def _config() -> ServerConfig:
 
 
 @contextlib.asynccontextmanager
-async def _server(vault, creds):
-    mcp = build_mcp(_config(), creds, VaultJwtVerifier(vault.read, ISSUER, AUDIENCE))
+async def _server(vault, creds, **verifier_kwargs):
+    mcp = build_mcp(_config(), creds, VaultJwtVerifier(vault.read, ISSUER, AUDIENCE, **verifier_kwargs))
     app = mcp.streamable_http_app(
         stateless_http=True,
         json_response=True,
@@ -72,13 +72,13 @@ def test_forged_token_gets_401(vault, creds):
     assert run(go).status_code == 401
 
 
-def test_reader_group_calls_all_tools(vault, creds):
+def test_reader_group_lists_all_tools_and_calls_list_orders(vault, creds):
     async def go():
         async with _server(vault, creds) as app:
             return await _call(app, VaultIdentityAuth(vault.read, "mcp-orders"), "list_orders", {"status": "pending"})
 
     tools, result = run(go)
-    assert tools == ["get_order", "list_orders", "whoami"]
+    assert tools == ["delete_order", "get_order", "list_orders", "whoami"]
     assert not result.is_error
     assert "acme-ltd" in result.content[0].text
     assert creds.queries[-1][1] == ["pending", 20]
@@ -95,6 +95,46 @@ def test_reporter_group_cannot_call_get_order(vault, creds):
     assert result.is_error
     assert "not permitted" in result.content[0].text
     assert creds.queries == []
+
+
+@pytest.mark.parametrize("groups", [["mcp-orders-reader"], ["mcp-orders-reporter"], ["mcp-orders-reader", "mcp-orders-reporter"]])
+def test_delete_order_is_denied_for_every_group(vault, creds, groups):
+    # mcp-orders-reader is the laptop's group: even the broadest client cannot delete
+    vault.groups = groups
+
+    async def go():
+        async with _server(vault, creds) as app:
+            return await _call(app, VaultIdentityAuth(vault.read, "mcp-orders"), "delete_order", {"order_id": 1})
+
+    _, result = run(go)
+    assert result.is_error
+    assert "permission denied" in result.content[0].text
+    assert creds.queries == []
+
+
+def test_delete_order_denied_even_if_a_group_were_granted_it(vault, creds):
+    # Defence in depth: a future GROUP_TOOLS mistake still cannot delete anything
+    granted = {"mcp-orders-reader": frozenset({"delete_order", "list_orders", "get_order", "whoami"})}
+
+    async def go():
+        async with _server(vault, creds, group_tools=granted) as app:
+            return await _call(app, VaultIdentityAuth(vault.read, "mcp-orders"), "delete_order", {"order_id": 1})
+
+    _, result = run(go)
+    assert result.is_error
+    assert "permission denied" in result.content[0].text
+    assert "not supported" in result.content[0].text
+    assert creds.queries == []
+
+
+def test_delete_order_is_annotated_destructive(vault, creds):
+    async def go():
+        async with _server(vault, creds) as app, _http(app, VaultIdentityAuth(vault.read, "mcp-orders")) as http, Client(streamable_http_client(URL, http_client=http)) as client:
+            return {t.name: t for t in (await client.list_tools()).tools}["delete_order"]
+
+    tool = run(go)
+    assert tool.annotations.destructive_hint is True
+    assert tool.output_schema is None
 
 
 def test_whoami_shows_caller_and_db_user_never_password(vault, creds):

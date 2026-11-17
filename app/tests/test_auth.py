@@ -9,7 +9,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from conftest import AUDIENCE, ISSUER
-from mcp_lab.auth import MIN_REFRESH_SECONDS, VaultJwtVerifier, tools_for_groups
+from mcp_lab.auth import GROUP_TOOLS, MIN_REFRESH_SECONDS, VaultJwtVerifier, tools_for_groups
 
 
 class Clock:
@@ -147,6 +147,11 @@ def test_jwks_fetch_does_not_block_cached_keys(vault):
     finally:
         release.set()
         forged.join(5)
+
+
+def test_no_group_grants_delete_order():
+    # delete_order must stay denied for everyone, the laptop's mcp-orders-reader group included
+    assert all("delete_order" not in tools for tools in GROUP_TOOLS.values())
 
 
 def test_tools_for_groups_ignores_non_strings():

@@ -61,7 +61,7 @@ check "401 without a bearer token" grep -q '^HTTP/1.1 401' <<<"${out}"
 check "WWW-Authenticate points at protected resource metadata" grep -qi '^www-authenticate: Bearer .*resource_metadata=' <<<"${out}"
 
 log "A2  Authorised client pod (orders-agent, group mcp-orders-reader)"
-check "lists 3 tools" wait_for_log mcp-client-orders-agent '.event == "tools_listed" and (.tools | length) == 3'
+check "lists 4 tools (delete_order listed but never granted)" wait_for_log mcp-client-orders-agent '.event == "tools_listed" and (.tools | length) == 4'
 check "list_orders returns rows" wait_for_log mcp-client-orders-agent '.event == "tool_called" and .tool == "list_orders" and .is_error == false'
 
 log "A3-A4  Each side can do exactly one thing in Vault"
@@ -113,8 +113,11 @@ check "access returns once membership is restored" test "$(mcp_rpc "${fresh}" to
 
 log "A10 Laptop client via task mcp:token"
 laptop="$(scripts/mcp-token.sh)"
-rows="$(mcp_tool "${laptop}" list_orders '{"status":"pending"}' | jq -r '.structuredContent.result | length')"
+# || true: an HTTP error (mcp_tool returns 1) must record a FAIL, not abort the run before later restores
+rows="$(mcp_tool "${laptop}" list_orders '{"status":"pending"}' | jq -r '.structuredContent.result | length' || true)"
 check "laptop token lists pending orders (${rows} rows)" test "${rows:-0}" -ge 1
+denied="$(mcp_tool "${laptop}" delete_order '{"order_id":1}' | jq -r 'select(.isError == true) | .content[0].text' || true)"
+check "laptop delete_order -> permission denied" grep -q "permission denied" <<<"${denied}"
 logins="$(kubectl logs vault-0 -n vault --since-time="${START}" | grep '^{' \
   | jq -c 'select(.type == "response" and .request.path == "auth/kubernetes/login" and .auth.metadata.service_account_namespace == "mcp-client-laptop")' | wc -l | tr -d ' ')"
 check "the laptop logged in to Vault (${logins} logins in this run)" test "${logins}" -ge 1

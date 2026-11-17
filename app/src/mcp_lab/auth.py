@@ -159,5 +159,5 @@ def require(tool: str) -> AccessToken:
     token = get_access_token()
     if token is None or tool not in token.scopes:
         log_event(log, logging.WARNING, "tool_denied", tool=tool, client=token.client_id if token else None)
-        raise ToolError(f"{tool} is not permitted for this client")
+        raise ToolError(f"permission denied: {tool} is not permitted for this client")
     return token

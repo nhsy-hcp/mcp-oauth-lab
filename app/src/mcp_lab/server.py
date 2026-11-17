@@ -14,7 +14,9 @@ from typing import Any
 import anyio
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -54,6 +56,14 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
         """Get one preview order by id."""
         require("get_order")
         return tools.get_order(creds, order_id)
+
+    # Listed so clients see it is refused; annotated destructive so a model client treats it with care
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True), structured_output=False)
+    def delete_order(order_id: int) -> None:
+        """Delete one preview order. Always denied: no Vault group is granted it, and orders are read-only."""
+        require("delete_order")  # no GROUP_TOOLS entry grants delete_order, so this raises for every caller
+        # Defence in depth if a group is ever granted it: there is no DELETE path, and the DB grant is SELECT only.
+        raise ToolError(f"permission denied: delete_order is not supported (order {int(order_id)} untouched; orders are read-only)")
 
     @mcp.tool()
     def whoami() -> dict[str, Any]:

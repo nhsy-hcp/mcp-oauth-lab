@@ -56,7 +56,7 @@ claude   # then: "Which preview orders are pending, and which database user did 
 ## 3. Client pods authenticate with nothing but their ServiceAccount (A2, A7, A8)
 
 ```bash
-task logs NS=mcp-client-orders-agent      # tools_listed (3), tool_called ... is_error=false
+task logs NS=mcp-client-orders-agent      # tools_listed (4), tool_called ... is_error=false
 task logs NS=mcp-client-reporting-agent   # get_order -> "not permitted" (group mcp-orders-reporter)
 task logs NS=mcp-client-unlisted          # mcp_call_failed status=401 (valid Vault login, no group)
 task logs NS=mcp-client-orders-agent C=vault-proxy
@@ -120,7 +120,7 @@ it. `demo:mcp-auth` simulates both cases on orders-agent and re-runs the script.
 | M7 | Break-glass revoke | New user within seconds; old one dropped |
 | M8 | Schema isolation | No tool for `payments`; `SELECT` refused; canary never returned |
 | A1 | No token | `401` + `WWW-Authenticate` with `resource_metadata` |
-| A2 | Authorised client pod | 3 tools, rows returned |
+| A2 | Authorised client pod | 4 tools listed (`delete_order` is never granted), rows returned |
 | A3 | Server cannot mint client tokens | `403` |
 | A4 | Client cannot read database credentials | `403` |
 | A5 | Forged signature | `401` |
@@ -128,6 +128,6 @@ it. `demo:mcp-auth` simulates both cases on orders-agent and re-runs the script.
 | A7 | Tool outside the client's group | Tool error: not permitted |
 | A8 | Valid Vault login, no group | `401` |
 | A9 | Group membership removed in Vault | Fresh token `401`; restored → `200` |
-| A10 | Laptop via `task mcp:token` | Rows returned; no laptop Vault token left alive |
+| A10 | Laptop via `task mcp:token` | Rows returned; `delete_order` permission denied; no laptop Vault token left alive |
 | A11 | Audit log | Credentials and tokens issued only to the expected identities; denials recorded |
 | A12 | `config:mcp-auth` re-run after a ServiceAccount is recreated | Alias follows the new UID; group membership kept |

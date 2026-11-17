@@ -122,6 +122,7 @@ A token looks like this:
 | --- | --- |
 | `mcp-orders-reader` | `list_orders`, `get_order`, `whoami` |
 | `mcp-orders-reporter` | `list_orders` |
+| (none) | `delete_order`: listed, but no group grants it, so every caller gets "permission denied" |
 
 The control is split on purpose. Who is in a group is runtime state in Vault, changed by platform admins and
 audited. What a group may call is code, changed by pull request and tested.

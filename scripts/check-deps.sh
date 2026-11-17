@@ -1,6 +1,7 @@
 #!/bin/bash
 # Check that every CLI tool the lab needs is installed. Safe to re-run.
-# Lint tools are optional unless --lint is given (task lint passes it).
+# Default: the lab tools are required and the lint tools are optional.
+# --lint (task lint): only the lint tools are required, so CI can lint without the cluster tools (k3d, kubectl, ...).
 #
 # Usage: scripts/check-deps.sh [--lint]
 set -euo pipefail
@@ -14,8 +15,12 @@ esac
 
 REQUIRED=(kubectl helm k3d jq task uv envsubst openssl vault)
 LINT=(pre-commit shellcheck gitleaks yamllint hadolint ruff)
-# Optional extras: dot renders docs/diagrams (task docs:diagrams), npx runs the MCP Inspector
-EXTRAS=(dot npx)
+if [ "${lint_required}" = true ]; then
+  REQUIRED=(task uv) # task runs the hooks, uv runs the unit tests in test:ci
+fi
+# Optional extras: dot renders docs/diagrams (task docs:diagrams), npx runs the MCP Inspector,
+# act runs the GitHub CI lint job locally (task ci:act, part of test:ci)
+EXTRAS=(dot npx act)
 missing=()
 optional_missing=()
 
@@ -28,11 +33,13 @@ for bin in "${REQUIRED[@]}"; do
   fi
 done
 
-if command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; then
-  printf '  ok       %s\n' "docker/podman"
-else
-  printf '  MISSING  %s\n' "docker or podman"
-  missing+=("docker/podman")
+if [ "${lint_required}" = false ]; then
+  if command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; then
+    printf '  ok       %s\n' "docker/podman"
+  else
+    printf '  MISSING  %s\n' "docker or podman"
+    missing+=("docker/podman")
+  fi
 fi
 
 for bin in "${LINT[@]}"; do

@@ -15,6 +15,8 @@ vars:
   app_image: localhost/mcp-lab:local
   # MCP Inspector (npx) for task mcp:inspector; v2 needs Node >= 22.19
   inspector_version: "2.13.0"
+  # act runner image for ci:act; ubuntu-latest on GitHub is 24.04
+  act_image: catthehacker/ubuntu:act-24.04
   container_cli:
     sh: command -v podman >/dev/null 2>&1 && echo podman || echo docker
   # TTLs: db max_ttl must never exceed token_max_ttl (leases are children of the Proxy token)
@@ -74,10 +76,21 @@ tasks:
       - gitleaks git --redact --no-banner
 
   test:
+    desc: Run the mcp-lab unit tests (pytest) and the script tests, no cluster needed
+    cmds:
+      - task: test:unit
+      - task: test:scripts
+
+  test:unit:
     desc: Run the mcp-lab unit tests (pytest, no cluster needed)
     dir: app
     cmds:
       - uv run --frozen pytest -q
+
+  test:scripts:
+    desc: Run the Bash script tests (no cluster needed)
+    cmds:
+      - scripts/test-check-deps.sh
 
   build:
     desc: Build the mcp-lab image (server and client) and import it into the k3d cluster
@@ -97,16 +110,25 @@ tasks:
       - task: demo:mcp-auth
 
   test:ci:
-    desc: CI pipeline - lint and unit tests; with E2E=true also builds the lab and runs test:all
+    desc: CI pipeline - lint, unit tests and the GitHub lint job under act; with E2E=true also builds the lab and runs test:all
     cmds:
       - task: lint
       - task: test
+      - task: ci:act
       - |
         if [ "${E2E:-false}" = "true" ]; then
           task all && task test:all
         else
           echo "E2E not requested (set E2E=true to build the lab and run test:all)"
         fi
+
+  ci:act:
+    desc: Run the GitHub "lint and unit tests" job locally in a container with act (needs act and a Docker socket)
+    preconditions:
+      - sh: command -v act
+        msg: "act is not installed (brew install act); it runs .github/workflows/ci.yml locally"
+    cmds:
+      - act push -j lint -P ubuntu-latest={{.act_image}}
 
   clean:
     desc: Delete the k3d cluster, Vault init data and temporary files

@@ -52,13 +52,14 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
 | `task all` (`up`) | Builds the whole lab |
 | `task down` | Stops the cluster, keeping its data; afterwards run `task cluster:up` and `task unseal:vault` |
 | `task lint` | Runs every pre-commit hook plus a full-history gitleaks scan |
-| `task test` | Runs the unit tests (no cluster) |
+| `task test` | Runs the unit tests and the script tests (no cluster) |
 | `task test:all` | Unit tests plus `demo:mcp` (M1-M8) and `demo:mcp-auth` (A1-A12) on the running lab |
 | `task mcp:token` | Prints a 5-minute Vault identity JWT for the laptop client |
 | `task mcp:inspector` | Opens the MCP Inspector web UI with the `Authorization` header pre-set; `mcp:inspector:refresh` renews the JWT |
 | `task ui` | Copies the Vault root token to the clipboard (`task token`) and opens the Vault UI |
 | `task docs:diagrams` | Renders `docs/diagrams/*.py` to `docs/images/*.png` (needs Graphviz) |
-| `task test:ci` | Lint and unit tests; with `E2E=true`, also builds the lab and runs `test:all` |
+| `task test:ci` | Lint, unit tests and `ci:act`; with `E2E=true`, also builds the lab and runs `test:all` |
+| `task ci:act` | Runs the GitHub `lint and unit tests` job locally with act (needs act and Docker) |
 | `task clean` | Deletes the cluster, `vault-init.json` and temporary files |
 
 For the full list, run `task --list`.

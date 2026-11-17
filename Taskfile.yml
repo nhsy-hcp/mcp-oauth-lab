@@ -289,6 +289,17 @@ tasks:
     cmds:
       - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp-auth.sh {{.mcp_token_ttl}} {{.demo_token_ttl}} {{.token_ttl}} {{.token_max_ttl}}
 
+  docs:diagrams:
+    desc: Render the doc diagrams (docs/diagrams/*.py -> docs/images/*.png); needs uv and Graphviz
+    dir: docs/diagrams
+    cmds:
+      - |
+        unset VIRTUAL_ENV  # use docs/diagrams/.venv, not an outer activated venv
+        for f in architecture identity_broker dynamic_db laptop_token; do
+          echo "Rendering ${f}..."
+          uv run --frozen python "${f}.py"
+        done
+
   status:
     desc: Show cluster, Vault and workload status
     silent: true

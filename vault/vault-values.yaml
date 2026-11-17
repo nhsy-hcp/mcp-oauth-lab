@@ -1,4 +1,4 @@
-# Vault Community Edition: single-node integrated storage (Raft) on k3d.
+# HashiCorp Vault: single-node integrated storage (Raft) on k3d.
 # Image tag is set from the Taskfile (vault_version_tag). Demo only: no TLS.
 global:
   tlsDisable: true

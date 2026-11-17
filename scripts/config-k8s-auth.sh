@@ -30,9 +30,9 @@ accessor="$(auth_accessor)"
 log "Using ${AUTH_MOUNT} accessor ${accessor}"
 
 # Alias metadata is addressed by mount accessor, which is only known after enabling the mount
-sed "s/__ACCESSOR__/${accessor}/g" vault-ce/policies/mcp-server.hcl | vault_cmd_in policy write mcp-server - >/dev/null
+sed "s/__ACCESSOR__/${accessor}/g" vault/policies/mcp-server.hcl | vault_cmd_in policy write mcp-server - >/dev/null
 log "Wrote policy mcp-server"
 
-jq --arg ttl "${TOKEN_TTL}" --arg max "${TOKEN_MAX_TTL}" '.token_ttl = $ttl | .token_max_ttl = $max' vault-ce/roles/mcp-server.json \
+jq --arg ttl "${TOKEN_TTL}" --arg max "${TOKEN_MAX_TTL}" '.token_ttl = $ttl | .token_max_ttl = $max' vault/roles/mcp-server.json \
   | vault_cmd_in write "${AUTH_MOUNT}/role/mcp-server" - >/dev/null
 log "Wrote ${AUTH_MOUNT}/role/mcp-server (token_ttl=${TOKEN_TTL}, token_max_ttl=${TOKEN_MAX_TTL})"

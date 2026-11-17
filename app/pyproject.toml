@@ -1,7 +1,7 @@
 [project]
 name = "mcp-lab"
 version = "0.1.0"
-description = "Orders MCP server and client: Vault CE as identity broker (Kubernetes auth -> Vault identity JWT) and dynamic PostgreSQL credentials via a Vault Proxy UNIX socket"
+description = "Orders MCP server and client: HashiCorp Vault as identity broker (Kubernetes auth -> Vault identity JWT) and dynamic PostgreSQL credentials via a Vault Proxy UNIX socket"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [

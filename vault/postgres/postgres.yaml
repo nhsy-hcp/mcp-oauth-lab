@@ -1,6 +1,6 @@
 # PostgreSQL 16 for the lab. Passwords come from the postgres-credentials Secret, which
 # scripts/install-postgres.sh generates (random) at install time. The bootstrap ConfigMap
-# (postgres-bootstrap) is also created by that script from vault-ce/postgres/.
+# (postgres-bootstrap) is also created by that script from vault/postgres/.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

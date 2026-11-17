@@ -1,5 +1,5 @@
 #!/bin/bash
-# Vault CE as identity broker for MCP auth. Safe to re-run.
+# HashiCorp Vault as identity broker for MCP auth. Safe to re-run.
 #   1. identity/oidc issuer, signing key "mcp" and token role "mcp-orders" (aud = mcp-orders, short TTL,
 #      claims: Vault group names + informational SA annotations)
 #   2. policy and auth/kubernetes role "mcp-client": may only mint that token
@@ -28,13 +28,13 @@ accessor="$(auth_accessor)"
 vault_cmd write identity/oidc/config issuer="${ISSUER}" >/dev/null 2>&1 || { err "could not set identity/oidc/config issuer"; exit 1; }
 # verification_ttl keeps a rotated-out public key in the JWKS long enough for tokens it signed to expire.
 vault_cmd write identity/oidc/key/mcp algorithm=RS256 rotation_period=24h verification_ttl=24h allowed_client_ids="${AUDIENCE}" >/dev/null
-sed "s/__ACCESSOR__/${accessor}/g" vault-ce/mcp-auth/mcp-orders-claims.json.tpl \
+sed "s/__ACCESSOR__/${accessor}/g" vault/mcp-auth/mcp-orders-claims.json.tpl \
   | vault_cmd_in write "identity/oidc/role/${AUDIENCE}" key=mcp client_id="${AUDIENCE}" ttl="${MCP_TOKEN_TTL}" template=- >/dev/null
 log "Wrote identity/oidc key mcp and role ${AUDIENCE} (aud=${AUDIENCE}, ttl=${MCP_TOKEN_TTL}, iss=${ISSUER}/v1/identity/oidc)"
 
 # --- 2. Who may mint it ---------------------------------------------------------------------------
-vault_cmd_in policy write mcp-client - <vault-ce/policies/mcp-client.hcl >/dev/null
-jq --arg ttl "${TOKEN_TTL}" --arg max "${TOKEN_MAX_TTL}" '.token_ttl = $ttl | .token_max_ttl = $max' vault-ce/roles/mcp-client.json \
+vault_cmd_in policy write mcp-client - <vault/policies/mcp-client.hcl >/dev/null
+jq --arg ttl "${TOKEN_TTL}" --arg max "${TOKEN_MAX_TTL}" '.token_ttl = $ttl | .token_max_ttl = $max' vault/roles/mcp-client.json \
   | vault_cmd_in write "${AUTH_MOUNT}/role/mcp-client" - >/dev/null
 log "Wrote policy mcp-client and ${AUTH_MOUNT}/role/mcp-client"
 

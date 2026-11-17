@@ -1,9 +1,9 @@
-# Solution Design: Vault CE as an Identity Broker for MCP Auth
+# Solution Design: HashiCorp Vault as an Identity Broker for MCP Auth
 
 ## 1. Summary
 
 An MCP server should know who is calling it and give each caller only the tools it needs. It should do this without
-anyone handing out API keys or client secrets. In this lab, Vault Community Edition acts as the identity broker:
+anyone handing out API keys or client secrets. In this lab, HashiCorp Vault acts as the identity broker:
 
 1. A client proves who it is with an identity it already has: a pod's Kubernetes ServiceAccount, or the laptop's
    kubeconfig through a dedicated ServiceAccount.
@@ -18,7 +18,7 @@ token has no access, and any token it already holds expires within 5 minutes.
 
 ![Architecture](images/architecture.png)
 
-**Platform:** k3d (`vault-mcp-lab`), Vault CE 2.2.2 (single-node Raft), PostgreSQL 16 and MCP Python SDK 2.3. MCP
+**Platform:** k3d (`vault-mcp-lab`), HashiCorp Vault 2.2.2 (single-node Raft), PostgreSQL 16 and MCP Python SDK 2.3. MCP
 is on `http://127.0.0.1:8000/mcp` (NodePort 30800, loopback only) and Vault is on `http://localhost:8200`. Vault
 uses its default mount paths: `auth/kubernetes`, `database/` and the built-in `identity/oidc`.
 
@@ -38,7 +38,6 @@ uses its default mount paths: `auth/kubernetes`, `database/` and the built-in `i
 **Non-goals**
 
 - OAuth 2.1 authorization-code flow for humans (see section 9).
-- Vault Enterprise features.
 - TLS and HA.
 - Free-form SQL tools.
 
@@ -185,7 +184,7 @@ can act as the laptop client.
   issuer. A full flow needs an authorization server: Vault's OIDC provider, Keycloak or another IdP. In that flow
   the MCP server would still verify tokens and never forward them to Vault.
 - **Per-user identity.** The Vault entity in the audit log is the workload, not the human behind it.
-- **Vault Enterprise** adds:
+- **Vault Enterprise features** such as:
   - namespaces per team;
   - Sentinel (for example, no production tokens out of hours);
   - control groups (a human approves a sensitive tool);

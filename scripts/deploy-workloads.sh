@@ -3,7 +3,7 @@
 # "pod" is not false) a Deployment per entry in a workloads file, then wait for the rollouts. Safe to re-run.
 #
 # Usage: scripts/deploy-workloads.sh <workloads.json> <deployment-template> <deployment-name> <vault-role> <app-image> <proxy-image>
-#   e.g. scripts/deploy-workloads.sh vault-ce/servers.json mcp-server-deployment mcp-orders mcp-server ...
+#   e.g. scripts/deploy-workloads.sh vault/servers.json mcp-server-deployment mcp-orders mcp-server ...
 # Env: MCP_HOST_PORT (server), CLIENT_INTERVAL_SECONDS (clients)
 set -euo pipefail
 # shellcheck source=scripts/lib.sh

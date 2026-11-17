@@ -1,6 +1,6 @@
 # vault-mcp-identity-broker
 
-Vault Community Edition as an **identity broker for MCP auth**, on a local k3d cluster.
+HashiCorp Vault as an **identity broker for MCP auth**, on a local k3d cluster.
 
 - **Clients** prove their Kubernetes identity to Vault and receive a **5-minute, audience-bound JWT**:
   - pods, through a Vault Proxy sidecar;
@@ -18,7 +18,7 @@ Vault Community Edition as an **identity broker for MCP auth**, on a local k3d c
 
 ```bash
 task init     # pre-commit hooks, Helm repo, .env, Python venv
-task all      # k3d cluster, Vault CE, PostgreSQL, auth, MCP server, identity broker, client pods
+task all      # k3d cluster, Vault, PostgreSQL, auth, MCP server, identity broker, client pods
 task test:all # unit tests + live scenarios M1-M8 and A1-A11
 
 TOKEN=$(task mcp:token)

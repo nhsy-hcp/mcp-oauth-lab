@@ -33,7 +33,7 @@ with diagram("identity-broker", direction="LR", nodesep="1.0", ranksep="1.6"):
             "identity/oidc/role/mcp-orders", "key mcp (RS256) · aud mcp-orders · ttl 5m"
         )
         jwks = box("identity/oidc/.well-known/keys", "public JWKS (unauthenticated)")
-        vault = icon(Vault, "Vault CE")
+        vault = icon(Vault, "HashiCorp Vault")
     with server_ns("mcp-server-orders-preview"):
         mcp = icon(Pod, "orders MCP server", "VaultJwtVerifier")
         proxy_s = box("vault-proxy sidecar", "role mcp-server")

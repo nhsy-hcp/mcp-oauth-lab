@@ -1,5 +1,5 @@
 #!/bin/bash
-# Identity-broker scenarios A1-A11: Vault CE issues short-lived, audience-bound identity JWTs; the MCP server
+# Identity-broker scenarios A1-A11: Vault issues short-lived, audience-bound identity JWTs; the MCP server
 # authorises tools by Vault group. Exits non-zero if any check fails. Restores any Vault change it makes.
 #
 # Usage: scripts/demo-mcp-auth.sh <mcp_token_ttl> <demo_token_ttl> <token_ttl> <token_max_ttl>

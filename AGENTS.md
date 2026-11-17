@@ -4,7 +4,7 @@ Rules and orientation for AI agents working in this repository.
 
 ## Purpose
 
-A local lab showing Vault Community Edition as an **identity broker for MCP auth** on k3d. Client pods (and the
+A local lab showing HashiCorp Vault as an **identity broker for MCP auth** on k3d. Client pods (and the
 operator's laptop) log in to Vault with Kubernetes auth and receive a short-lived, audience-bound Vault identity
 JWT. The MCP server verifies the JWT against Vault's JWKS and authorises tools by Vault identity group. The server
 itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar on a UNIX socket. The design is
@@ -22,7 +22,7 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
   `.env.template`.
 - Stage files by explicit path only, and never use `--no-verify`. Run `task lint` before every commit.
 - Commit messages follow Conventional Commits (`type: description`, lowercase).
-- Vault Community Edition only, with Vault's default mount paths: `auth/kubernetes`, `database/`, and the built-in
+- Use Vault's default mount paths: `auth/kubernetes`, `database/`, and the built-in
   `identity/oidc`.
 - Python 3.12 managed with uv (`app/pyproject.toml`); ruff with a 200-character line length. The app talks to Vault
   only through Vault Proxy over the UNIX socket, with the standard library (no `hvac`).
@@ -38,7 +38,7 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
 | --- | --- |
 | `Taskfile.yml` | All tasks; version pins and TTL variables at the top |
 | `scripts/` | Bash helpers invoked from the Taskfile |
-| `vault-ce/` | Vault Helm values, RBAC, policies, roles, identity config, PostgreSQL manifests and SQL |
+| `vault/` | Vault Helm values, RBAC, policies, roles, identity config, PostgreSQL manifests and SQL |
 | `templates/` | Per-workload manifest templates rendered with `envsubst` |
 | `app/` | `mcp_lab` Python package (server and client), tests and Dockerfile |
 | `docs/` | Design, walkthrough, troubleshooting, diagram sources and PNGs |

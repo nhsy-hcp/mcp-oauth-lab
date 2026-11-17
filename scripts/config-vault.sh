@@ -16,8 +16,8 @@ else
   vault_cmd audit enable -path=audit_stdout file file_path=stdout
 fi
 
-kubectl apply -f vault-ce/vault-token-reviewer.yaml
-kubectl apply -f vault-ce/vault-sa-reader-rbac.yaml
+kubectl apply -f vault/vault-token-reviewer.yaml
+kubectl apply -f vault/vault-sa-reader-rbac.yaml
 
 # The token controller fills .data.token asynchronously; config:k8s-auth needs it.
 for i in $(seq 1 30); do

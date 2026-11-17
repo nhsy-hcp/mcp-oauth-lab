@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 NS="postgres"
-DIR="vault-ce/postgres"
+DIR="vault/postgres"
 
 kubectl create namespace "${NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 

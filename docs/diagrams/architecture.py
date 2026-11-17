@@ -1,4 +1,4 @@
-"""High-level view: Vault CE as identity broker between MCP clients and the orders MCP server on k3d."""
+"""High-level view: HashiCorp Vault as identity broker between MCP clients and the orders MCP server on k3d."""
 
 from common import (
     GREY,
@@ -37,7 +37,9 @@ with diagram("architecture", direction="LR"):
             )
         with vault_ns():
             vault = icon(
-                Vault, "Vault CE 2.2.2", "auth/kubernetes · identity/oidc\ndatabase/"
+                Vault,
+                "HashiCorp Vault 2.2.2",
+                "auth/kubernetes · identity/oidc\ndatabase/",
             )
             groups = box("identity groups", "who may call which tools")
         with data_ns():

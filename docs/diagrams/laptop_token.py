@@ -25,11 +25,11 @@ with diagram("laptop-token", direction="LR"):
         "k3s API server",
         "kubectl create token\nmcp-client-laptop-sa · aud vault · 10m",
     )
-    with vault_ns("Vault CE · localhost:8200"):
+    with vault_ns("HashiCorp Vault · localhost:8200"):
         login = box("auth/kubernetes/login", "role mcp-client")
         mint = box("identity/oidc/token/mcp-orders", "5-min JWT")
         revoke = box("auth/token/revoke-self", "Vault token gone at once")
-        vault = icon(Vault, "Vault CE")
+        vault = icon(Vault, "HashiCorp Vault")
     with server_ns("MCP server · 127.0.0.1:8000"):
         mcp = icon(Pod, "orders MCP server")
 

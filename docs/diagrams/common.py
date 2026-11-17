@@ -99,7 +99,7 @@ def laptop(title: str = "Laptop") -> Cluster:
     return group(title, GREEN, GREEN_FILL)
 
 
-def vault_ns(title: str = "Vault Community Edition · vault-0") -> Cluster:
+def vault_ns(title: str = "HashiCorp Vault · vault-0") -> Cluster:
     return group(title, GREY, GREY_FILL)
 
 

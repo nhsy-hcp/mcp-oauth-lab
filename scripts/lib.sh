@@ -10,8 +10,8 @@ set -euo pipefail
 VAULT_NS="${VAULT_NS:-vault}"
 VAULT_POD="${VAULT_POD:-vault-0}"
 INIT_FILE="${INIT_FILE:-vault-init.json}"
-SERVERS_FILE="${SERVERS_FILE:-vault-ce/servers.json}"
-CLIENTS_FILE="${CLIENTS_FILE:-vault-ce/mcp-clients.json}"
+SERVERS_FILE="${SERVERS_FILE:-vault/servers.json}"
+CLIENTS_FILE="${CLIENTS_FILE:-vault/mcp-clients.json}"
 AUTH_MOUNT="auth/kubernetes"
 
 log() { printf '==> %s\n' "$*"; }

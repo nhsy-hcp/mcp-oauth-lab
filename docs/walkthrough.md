@@ -7,7 +7,7 @@ Build the lab, then go through the scenarios in demo order. Every scenario is au
 
 ```bash
 task init           # hooks, Helm repo, .env, app venv
-task all            # cluster -> Vault CE -> PostgreSQL -> database/ -> auth/kubernetes -> server -> broker -> clients
+task all            # cluster -> Vault -> PostgreSQL -> database/ -> auth/kubernetes -> server -> broker -> clients
 task status
 ```
 

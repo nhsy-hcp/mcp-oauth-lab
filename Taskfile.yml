@@ -1,6 +1,6 @@
 version: '3'
 
-# Vault CE as an identity broker for MCP auth on k3d:
+# HashiCorp Vault as an identity broker for MCP auth on k3d:
 # client pods (and the laptop) trade a Kubernetes identity for a short-lived Vault identity JWT;
 # the MCP server verifies it against Vault's JWKS and reads dynamic PostgreSQL credentials via Vault Proxy.
 # Design: docs/solution-design.md
@@ -172,7 +172,7 @@ tasks:
   # Vault
   # ==========================================================================
   install:vault:
-    desc: Helm install Vault CE (single-node Raft, NodePort 30820)
+    desc: Helm install HashiCorp Vault (single-node Raft, NodePort 30820)
     preconditions:
       - sh: kubectl config current-context | grep -q '^k3d-{{.cluster_name}}$'
         msg: kubectl context is not k3d-{{.cluster_name}} - run task cluster:up
@@ -181,7 +181,7 @@ tasks:
       - >-
         helm upgrade --install vault hashicorp/vault
         --version {{.vault_chart_version}} -n vault
-        --values vault-ce/vault-values.yaml
+        --values vault/vault-values.yaml
         --set server.image.repository={{.vault_image}}
         --set server.image.tag={{.vault_version_tag}}
       - |
@@ -248,7 +248,7 @@ tasks:
       - task: build
       - >-
         MCP_HOST_PORT={{.mcp_host_port}}
-        scripts/deploy-workloads.sh vault-ce/servers.json mcp-server-deployment mcp-orders mcp-server
+        scripts/deploy-workloads.sh vault/servers.json mcp-server-deployment mcp-orders mcp-server
         {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
 
   # ==========================================================================
@@ -267,7 +267,7 @@ tasks:
       - task: build
       - >-
         CLIENT_INTERVAL_SECONDS={{.client_interval_seconds}}
-        scripts/deploy-workloads.sh vault-ce/mcp-clients.json mcp-client-deployment mcp-client mcp-client
+        scripts/deploy-workloads.sh vault/mcp-clients.json mcp-client-deployment mcp-client mcp-client
         {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
 
   mcp:token:

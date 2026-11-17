@@ -31,7 +31,7 @@ with diagram("dynamic-db", direction="LR"):
             "policy: read database/creds/&lt;env&gt;-&lt;app&gt;",
         )
         creds = box("database/creds/preview-orders", "10m default · 30m max")
-        vault = icon(Vault, "Vault CE")
+        vault = icon(Vault, "HashiCorp Vault")
     with data_ns():
         pg = icon(
             PostgreSQL,

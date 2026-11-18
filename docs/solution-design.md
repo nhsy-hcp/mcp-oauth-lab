@@ -185,7 +185,7 @@ can act as the laptop client.
 
 - **Standard MCP OAuth for humans.** Claude Code and the Inspector speak OAuth 2.1 with discovery. Here they use a
   pre-minted bearer token instead. The SDK already serves protected resource metadata that names Vault as the
-  issuer. A full flow needs an authorization server: Vault's OIDC provider, Keycloak or another IdP. In that flow
+  issuer. A full flow needs an authorization server: Vault's OIDC provider, IBM Verify or another IdP. In that flow
   the MCP server would still verify tokens and never forward them to Vault.
 - **Per-user identity.** The Vault entity in the audit log is the workload, not the human behind it.
 - **Vault Enterprise features** such as:

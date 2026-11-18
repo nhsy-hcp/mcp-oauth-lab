@@ -1,6 +1,6 @@
 # vault-mcp-identity-broker
 
-HashiCorp Vault as an **identity broker for MCP auth**, on a local k3d cluster.
+HashiCorp Vault as an identity broker for MCP auth, on a local k3d cluster.
 
 - **Clients** prove their Kubernetes identity to Vault and receive a **5-minute, audience-bound JWT**:
   - pods, through a Vault Proxy sidecar;
@@ -81,5 +81,5 @@ free; otherwise run `task all mcp_host_port=<port>`. Check with `task deps`.
 
 ## Related lab
 
-[`learn-vault-proxy`](../learn-vault-proxy) is the same Vault Proxy socket pattern applied to plain apps. It
+[`learn-vault-proxy`](https://github.com/nhsy-hcp/learn-vault-proxy) is the same Vault Proxy socket pattern applied to plain apps. It
 covers KV v2 and outage behaviour, and this lab reuses its credential code.

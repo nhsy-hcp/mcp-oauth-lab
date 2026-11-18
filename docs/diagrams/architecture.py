@@ -24,7 +24,7 @@ with diagram("architecture", direction="TB", nodesep="0.8", ranksep="0.9"):
             agent = icon(Pod, "orders-agent", "group mcp-orders-reader")
             reporter = icon(Pod, "reporting-agent", "group mcp-orders-reporter")
             unlisted = icon(Pod, "unlisted", "no group: 401")
-        with server_ns("mcp-server-orders-preview"):
+        with server_ns("mcp-server-dev"):
             server = icon(Pod, "orders MCP server", "HTTP :8080/mcp\nNodePort 30800")
         with vault_ns("vault"):
             vault = icon(
@@ -35,7 +35,7 @@ with diagram("architecture", direction="TB", nodesep="0.8", ranksep="0.9"):
             groups = box("identity groups", "who may call which tools")
         with data_ns():
             # Two detail lines, like its neighbours, so the row's boxes are the same height
-            pg = icon(PostgreSQL, "PostgreSQL", "database preview\ntable orders.items")
+            pg = icon(PostgreSQL, "PostgreSQL", "database dev\ntable orders.items")
 
     same_rank(agent, reporter, unlisted)
     same_rank(server, groups, vault, pg)

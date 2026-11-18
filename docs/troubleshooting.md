@@ -10,6 +10,6 @@
 | `421 Invalid Host header` | Host header not in `MCP_ALLOWED_HOSTS` (DNS-rebinding protection) | Use `localhost:<mcp_host_port>` or `127.0.0.1:<mcp_host_port>`; in-cluster use the `mcp-orders.<ns>.svc` name |
 | `task mcp:token`: `permission denied` | `config:mcp-auth` not run, or `mcp-client-laptop-sa` missing | `task config:mcp-auth` |
 | Client pod logs `identity_token_failed status=403` | The pod's identity lacks the `mcp-client` policy (wrong namespace or SA name) | Namespace must match `mcp-client-*` and the SA `mcp-client-*-sa` |
-| Server not ready, `vault_denied` in logs | Proxy not logged in yet, or the SA annotations are missing (templated path does not resolve) | `kubectl get sa -n mcp-server-orders-preview -o yaml`; `task logs C=vault-proxy` |
+| Server not ready, `vault_denied` in logs | Proxy not logged in yet, or the SA annotations are missing (templated path does not resolve) | `kubectl get sa -n mcp-server-dev -o yaml`; `task logs C=vault-proxy` |
 | After a laptop restart nothing works | Vault is sealed | `task cluster:up` then `task unseal:vault` |
 | `task docs:diagrams` fails with `syntax error near '>'` | Raw `<`, `>` or `->` in a Graphviz HTML label | Use `→`, `&lt;` or `&gt;`; line breaks are `<br/>` |

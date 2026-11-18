@@ -54,7 +54,7 @@ The decode command prints the JWT header and claims. `groups` decides which tool
 {
   "application_name": "laptop",
   "aud": "mcp-orders",
-  "environment": "preview",
+  "environment": "dev",
   "exp": 1794996793,
   "groups": [
     "mcp-orders-reader"

@@ -22,8 +22,8 @@ check "server uses a Vault-minted user (${user})" grep -q '^v-' <<<"${user}"
 check "lease has <= 600 s left (${left})" test "${left}" -le 600
 
 log "M3-M5  The server's Vault policy is one exact path"
-check "M3 own path database/creds/preview-orders is readable" test "$(proxy_read "${SERVER_NS}" mcp-orders database/creds/preview-orders)" = ok
-check "M4 other app database/creds/preview-payments is denied" test "$(proxy_read "${SERVER_NS}" mcp-orders database/creds/preview-payments)" = denied
+check "M3 own path database/creds/dev-orders is readable" test "$(proxy_read "${SERVER_NS}" mcp-orders database/creds/dev-orders)" = ok
+check "M4 other app database/creds/dev-payments is denied" test "$(proxy_read "${SERVER_NS}" mcp-orders database/creds/dev-payments)" = denied
 check "M5 other environment database/creds/production-orders is denied" test "$(proxy_read "${SERVER_NS}" mcp-orders database/creds/production-orders)" = denied
 
 log "M6  No secrets in the app container"
@@ -34,7 +34,7 @@ mounted="$(kubectl exec -n "${SERVER_NS}" deploy/mcp-orders -c app -- python -c 
 check "no ServiceAccount or Vault token mounted in the app container (exists: ${mounted})" test "${mounted}" = False
 
 log "M7  Break-glass revoke, then the server recovers on its own"
-scripts/vault.sh lease revoke -prefix database/creds/preview-orders >/dev/null
+scripts/vault.sh lease revoke -prefix database/creds/dev-orders >/dev/null
 new_user=""
 for _ in $(seq 1 30); do
   new_user="$(mcp_tool "${token}" whoami | jq -r '.structuredContent.database.current_user // empty' || true)"
@@ -44,13 +44,13 @@ done
 check "new database user after revoke (${user} -> ${new_user:-none})" test -n "${new_user}" -a "${new_user}" != "${user}"
 check "old user dropped from PostgreSQL" test "$(pg_role_count "${user}")" = 0
 
-log "M8  Schema isolation: preview_orders_ro has no grant on payments"
+log "M8  Schema isolation: dev_orders_ro has no grant on payments"
 check "no MCP tool touches payments" bash -c '! grep -q payments <<<"$1"' _ "$(mcp_rpc "${token}" tools/list)"
 VAULT_TOKEN="$(root_token)"
 export VAULT_TOKEN
-lease="$(vault_cmd read -format=json database/creds/preview-orders)"
+lease="$(vault_cmd read -format=json database/creds/dev-orders)"
 pg_user="$(jq -r .data.username <<<"${lease}")"
-denied="$(psql_as "${pg_user}" "$(jq -r .data.password <<<"${lease}")" -d preview -Atc 'SELECT token FROM payments.card_tokens' 2>&1 || true)"
+denied="$(psql_as "${pg_user}" "$(jq -r .data.password <<<"${lease}")" -d dev -Atc 'SELECT token FROM payments.card_tokens' 2>&1 || true)"
 vault_cmd lease revoke "$(jq -r .lease_id <<<"${lease}")" >/dev/null
 check "SELECT on payments.card_tokens is refused" grep -q 'permission denied' <<<"${denied}"
 check "canary never returned" bash -c '! grep -q CANARY_NEVER_LEAK <<<"$1"' _ "${denied}"

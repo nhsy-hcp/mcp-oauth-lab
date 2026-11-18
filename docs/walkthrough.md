@@ -48,7 +48,7 @@ npx "@modelcontextprotocol/inspector@$V" --cli http://localhost:8000/mcp --trans
 Or with Claude Code. Approve the project server in `.mcp.json` the first time:
 
 ```bash
-claude   # then: "Which preview orders are pending, and which database user did the server use?"
+claude   # then: "Which dev orders are pending, and which database user did the server use?"
 ```
 
 `.mcp.json` runs `scripts/mcp-headers.sh` as a `headersHelper`. Claude Code reuses the token across calls and gets a new
@@ -66,10 +66,10 @@ task logs NS=mcp-client-orders-agent C=vault-proxy
 ## 4. Each side can do exactly one thing in Vault (A3, A4, M3–M5)
 
 ```bash
-kubectl exec -n mcp-server-orders-preview deploy/mcp-orders -c vault-proxy -- \
+kubectl exec -n mcp-server-dev deploy/mcp-orders -c vault-proxy -- \
   vault read -address=unix:///run/vault/proxy.sock identity/oidc/token/mcp-orders     # 403
 kubectl exec -n mcp-client-orders-agent deploy/mcp-client -c vault-proxy -- \
-  vault read -address=unix:///run/vault/proxy.sock database/creds/preview-orders       # 403
+  vault read -address=unix:///run/vault/proxy.sock database/creds/dev-orders           # 403
 ```
 
 ## 5. Forged and expired tokens (A5, A6)
@@ -91,7 +91,7 @@ scripts/vault.sh read identity/group/name/mcp-orders-reader
 ```bash
 task demo:mcp
 task logs C=app | grep -E 'creds_acquired|pool_opened'
-scripts/vault.sh lease revoke -prefix database/creds/preview-orders   # server recovers with a new user (M7)
+scripts/vault.sh lease revoke -prefix database/creds/dev-orders   # server recovers with a new user (M7)
 ```
 
 ## 8. Audit (A11)
@@ -101,7 +101,7 @@ kubectl logs vault-0 -n vault | grep '^{' | jq -c 'select(.type=="response") |
   {path: .request.path, ns: .auth.metadata.service_account_namespace, error}' | sort | uniq -c
 ```
 
-Only `mcp-server-orders-preview` receives `database/creds/preview-orders`. Only `mcp-client-*` identities receive
+Only `mcp-server-dev` receives `database/creds/dev-orders`. Only `mcp-client-*` identities receive
 `identity/oidc/token/mcp-orders`. The denied attempts are logged too.
 
 ## 9. Recreated ServiceAccounts (A12)

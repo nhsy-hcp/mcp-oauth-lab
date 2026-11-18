@@ -118,7 +118,7 @@ def fake_proxy(socket_dir: Path) -> Iterator[tuple[FakeProxyState, VaultClient]]
 
 def creds_response(
     username: str,
-    lease_id: str = "db/creds/preview-payments/abc123XYZ789",
+    lease_id: str = "db/creds/dev-payments/abc123XYZ789",
     lease_duration: int = 600,
 ) -> Route:
     return (
@@ -266,7 +266,7 @@ class FakeVault:
             "exp": now + self.ttl,
             "namespace": "root",
             "groups": self.groups,
-            "environment": "preview",
+            "environment": "dev",
             "application_name": "orders-agent",
         }
         kid = overrides.pop("kid", self.active_kid)
@@ -297,7 +297,7 @@ class FakeCreds:
         return fn(_FakeConn(self))
 
     def whoami(self) -> dict[str, Any]:
-        return {"current_user": "v-kubernetes-preview-orders-abc", "creds_path": "database/creds/preview-orders", "lease_id_suffix": "xyz", "lease_seconds_remaining": 540}
+        return {"current_user": "v-kubernetes-dev-orders-abc", "creds_path": "database/creds/dev-orders", "lease_id_suffix": "xyz", "lease_seconds_remaining": 540}
 
     def is_healthy(self) -> bool:
         return True

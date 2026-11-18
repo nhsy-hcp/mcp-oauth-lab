@@ -24,7 +24,7 @@ URL = "http://localhost:8000/mcp"
 
 
 def _config() -> ServerConfig:
-    return ServerConfig.from_env({"DB_CREDS_PATH": "database/creds/preview-orders", "DB_HOST": "pg", "DB_NAME": "preview"})
+    return ServerConfig.from_env({"DB_CREDS_PATH": "database/creds/dev-orders", "DB_HOST": "pg", "DB_NAME": "dev"})
 
 
 @contextlib.asynccontextmanager
@@ -147,7 +147,7 @@ def test_whoami_shows_caller_and_db_user_never_password(vault, creds):
 
     _, result = run(go)
     text = result.content[0].text
-    assert "entity-1234" in text and "v-kubernetes-preview-orders-abc" in text
+    assert "entity-1234" in text and "v-kubernetes-dev-orders-abc" in text
     assert "password" not in text
 
 

@@ -104,7 +104,7 @@ def vault_ns(title: str = "HashiCorp Vault") -> Cluster:
     return group(title, GREY, GREY_FILL)
 
 
-def data_ns(title: str = "postgres") -> Cluster:
+def data_ns(title: str = "postgres-dev") -> Cluster:
     return group(title, YELLOW, YELLOW_FILL)
 
 

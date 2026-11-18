@@ -243,12 +243,12 @@ tasks:
   # PostgreSQL and database secrets engine
   # ==========================================================================
   install:postgres:
-    desc: Deploy PostgreSQL 16 with bootstrap SQL (preview database, orders and payments schemas, group role)
+    desc: Deploy PostgreSQL 16 with bootstrap SQL (dev database, orders and payments schemas, group role)
     cmds:
       - scripts/install-postgres.sh
 
   config:db-secret:
-    desc: Database secrets engine at database/, pg-preview connection, preview-orders role, rotate-root
+    desc: Database secrets engine at database/, pg-dev connection, dev-orders role, rotate-root
     preconditions:
       - test -f vault-init.json
     cmds:
@@ -376,9 +376,9 @@ tasks:
       - vault status -address=http://127.0.0.1:8200 || true
 
   logs:
-    desc: "Follow logs (NS=mcp-server-orders-preview|mcp-client-orders-agent|..., C=app|vault-proxy)"
+    desc: "Follow logs (NS=mcp-server-dev|mcp-client-orders-agent|..., C=app|vault-proxy)"
     cmds:
-      - kubectl --context "$KUBECONTEXT" logs -f -n {{.NS | default "mcp-server-orders-preview"}} -l 'app.kubernetes.io/name in (mcp-orders,mcp-client)' -c {{.C | default "app"}}
+      - kubectl --context "$KUBECONTEXT" logs -f -n {{.NS | default "mcp-server-dev"}} -l 'app.kubernetes.io/name in (mcp-orders,mcp-client)' -c {{.C | default "app"}}
 
   logs:vault:
     desc: Follow Vault's audit and server log

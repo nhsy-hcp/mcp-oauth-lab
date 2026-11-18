@@ -4,12 +4,12 @@ import pytest
 
 from mcp_lab.config import DEFAULT_AUDIENCE, DEFAULT_ISSUER, ClientConfig, ConfigError, ServerConfig
 
-SERVER_ENV = {"DB_CREDS_PATH": "/database/creds/preview-orders/", "DB_HOST": "pg", "DB_NAME": "preview"}
+SERVER_ENV = {"DB_CREDS_PATH": "/database/creds/dev-orders/", "DB_HOST": "pg", "DB_NAME": "dev"}
 
 
 def test_server_defaults():
     c = ServerConfig.from_env(SERVER_ENV)
-    assert c.db_creds_path == "database/creds/preview-orders"
+    assert c.db_creds_path == "database/creds/dev-orders"
     assert c.issuer == DEFAULT_ISSUER
     assert c.audience == DEFAULT_AUDIENCE
     assert c.allowed_hosts == ("localhost:8000", "127.0.0.1:8000")

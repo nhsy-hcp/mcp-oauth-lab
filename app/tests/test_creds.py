@@ -11,7 +11,7 @@ from conftest import Connector, PoolFactory, creds_response, truncated_response
 from mcp_lab.creds import CredentialManager, RetriesExhausted, ShuttingDown, classify_db_error
 from mcp_lab.vault_client import VaultDenied
 
-PATH = "db/creds/preview-payments"
+PATH = "db/creds/dev-payments"
 ROUTE = f"GET /v1/{PATH}"
 
 
@@ -31,7 +31,7 @@ def make_manager(vault, **kwargs):
         PATH,
         host="db",
         port=5432,
-        dbname="preview",
+        dbname="dev",
         pool_factory=pools,
         connector=connector,
         sleep=sleeps.append,

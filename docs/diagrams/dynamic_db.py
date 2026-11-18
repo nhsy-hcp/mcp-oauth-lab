@@ -19,7 +19,7 @@ from diagrams.onprem.database import PostgreSQL
 from diagrams.onprem.security import Vault
 
 with diagram("dynamic-db", direction="LR"):
-    with server_ns("mcp-server-orders-preview"):
+    with server_ns("mcp-server-dev"):
         sa = box("projected SA token", "aud=vault · Proxy container only")
         proxy = box(
             "vault-proxy sidecar",
@@ -31,12 +31,12 @@ with diagram("dynamic-db", direction="LR"):
             "auth/kubernetes/role/mcp-server",
             "policy: read database/creds/&lt;env&gt;-&lt;app&gt;",
         )
-        creds = box("database/creds/preview-orders", "10m default · 30m max")
+        creds = box("database/creds/dev-orders", "10m default · 30m max")
         vault = icon(Vault, "HashiCorp Vault")
     with data_ns():
         pg = icon(
             PostgreSQL,
-            "PostgreSQL preview",
+            "PostgreSQL dev",
             "orders.items: SELECT\npayments.*: no grant",
         )
 
@@ -56,7 +56,7 @@ with diagram("dynamic-db", direction="LR"):
     )
     (
         creds
-        >> ref("CREATE ROLE v-... IN ROLE preview_orders_ro<br/>VALID UNTIL expiry")
+        >> ref("CREATE ROLE v-... IN ROLE dev_orders_ro<br/>VALID UNTIL expiry")
         >> pg
     )
     app >> deliver(6, "fixed, parameterised SELECTs") >> pg

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Enable the database secrets engine at database/ (Vault's default path), write the pg-preview connection,
-# the preview-orders role, then rotate the admin password so only Vault knows it.
+# Enable the database secrets engine at database/ (Vault's default path), write the pg-dev connection,
+# the dev-orders role, then rotate the admin password so only Vault knows it.
 # Safe to re-run: an existing connection is left alone (its root password is already rotated).
 #
 # Usage: scripts/config-db-secret.sh <default_ttl> <max_ttl>
@@ -10,12 +10,12 @@ source "$(dirname "$0")/lib.sh"
 
 DEFAULT_TTL="${1:-10m}"
 MAX_TTL="${2:-30m}"
-PG_HOST="postgres.postgres.svc.cluster.local:5432"
-CONN="pg-preview"
-ADMIN="vault_admin_preview"
+PG_HOST="postgres.${POSTGRES_NS}.svc.cluster.local:5432"
+CONN="pg-dev"
+ADMIN="vault_admin_dev"
 # role | group role
 ROLES=(
-  "preview-orders|preview_orders_ro"
+  "dev-orders|dev_orders_ro"
 )
 
 VAULT_TOKEN="$(root_token)"
@@ -31,10 +31,10 @@ if vault_cmd read "database/config/${CONN}" >/dev/null 2>&1; then
 else
   # The bootstrap password goes on stdin (password=-), never on the command line.
   # shellcheck disable=SC2016 # {{username}}/{{password}} are Vault templates, not shell
-  kubectl get secret postgres-credentials -n postgres -o jsonpath='{.data.vault-admin-preview-password}' | base64 --decode \
+  kubectl get secret postgres-credentials -n "${POSTGRES_NS}" -o jsonpath='{.data.vault-admin-dev-password}' | base64 --decode \
     | vault_cmd_in write "database/config/${CONN}" \
       plugin_name=postgresql-database-plugin \
-      connection_url="postgresql://{{username}}:{{password}}@${PG_HOST}/preview?sslmode=disable" \
+      connection_url="postgresql://{{username}}:{{password}}@${PG_HOST}/dev?sslmode=disable" \
       allowed_roles="${allowed}" \
       username="${ADMIN}" \
       password=- \

@@ -72,7 +72,7 @@ jobs:
             echo "## Debug: CI failure"
             echo '### Pods'; echo '```'; kubectl get pods -A || true; echo '```'
             echo '### Vault'; echo '```'; kubectl logs vault-0 -n vault --tail=200 || true; echo '```'
-            for pair in mcp-server-orders-preview/mcp-orders mcp-client-orders-agent/mcp-client \
+            for pair in mcp-server-dev/mcp-orders mcp-client-orders-agent/mcp-client \
               mcp-client-reporting-agent/mcp-client mcp-client-unlisted/mcp-client; do
               ns="${pair%/*}"; deploy="${pair#*/}"
               echo "### ${ns}"; echo '```'

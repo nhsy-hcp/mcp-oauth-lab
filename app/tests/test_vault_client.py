@@ -11,13 +11,13 @@ from mcp_lab.vault_client import VaultClient
 
 def test_read_sends_x_vault_request_header_and_no_token(fake_proxy):
     state, vault = fake_proxy
-    state.routes["GET /v1/db/creds/preview-payments"] = (200, {}, {"data": {"x": 1}})
+    state.routes["GET /v1/db/creds/dev-payments"] = (200, {}, {"data": {"x": 1}})
 
-    status, _, body = vault.read("db/creds/preview-payments")
+    status, _, body = vault.read("db/creds/dev-payments")
 
     assert status == 200
     assert body == {"data": {"x": 1}}
-    (req,) = state.calls("GET", "/v1/db/creds/preview-payments")
+    (req,) = state.calls("GET", "/v1/db/creds/dev-payments")
     assert req.headers["X-Vault-Request"] == "true"
     assert "X-Vault-Token" not in req.headers
     assert "Authorization" not in req.headers
@@ -26,12 +26,12 @@ def test_read_sends_x_vault_request_header_and_no_token(fake_proxy):
 def test_cache_clear_request_shape(fake_proxy):
     state, vault = fake_proxy
 
-    assert vault.cache_clear("db/creds/preview-payments") == 200
+    assert vault.cache_clear("db/creds/dev-payments") == 200
 
     (req,) = state.calls("POST", "/proxy/v1/cache-clear")
     assert req.headers["X-Vault-Request"] == "true"
     assert req.headers["Content-Type"] == "application/json"
-    assert req.body == {"type": "request_path", "value": "/v1/db/creds/preview-payments"}
+    assert req.body == {"type": "request_path", "value": "/v1/db/creds/dev-payments"}
 
 
 def test_read_returns_headers(fake_proxy):

@@ -9,6 +9,7 @@ set -euo pipefail
 
 VAULT_NS="${VAULT_NS:-vault}"
 VAULT_POD="${VAULT_POD:-vault-0}"
+POSTGRES_NS="postgres-dev" # fixed: vault/postgres/postgres.yaml and DB_HOST use this name too
 INIT_FILE="${INIT_FILE:-vault-init.json}"
 SERVERS_FILE="${SERVERS_FILE:-vault/servers.json}"
 CLIENTS_FILE="${CLIENTS_FILE:-vault/mcp-clients.json}"
@@ -54,14 +55,14 @@ psql_as() {
   local user="$1" password="$2"
   shift 2
   # shellcheck disable=SC2016 # expanded by the pod's sh, not here
-  printf '%s\n' "${password}" | kubectl exec -i deploy/postgres -n postgres -- \
+  printf '%s\n' "${password}" | kubectl exec -i deploy/postgres -n "${POSTGRES_NS}" -- \
     sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$@"' sh -h 127.0.0.1 -U "${user}" "$@"
 }
 
 # Number of PostgreSQL roles named <role>: 1 while a dynamic user exists, 0 once Vault dropped it.
 # Usage: pg_role_count <role>
 pg_role_count() {
-  kubectl exec deploy/postgres -n postgres -- psql -U postgres -Atc \
+  kubectl exec deploy/postgres -n "${POSTGRES_NS}" -- psql -U postgres -Atc \
     "SELECT count(*) FROM pg_roles WHERE rolname = '$1'"
 }
 
@@ -75,7 +76,7 @@ auth_accessor() {
 
 # --- MCP helpers (demo scripts) --------------------------------------------------------------------
 MCP_URL="http://127.0.0.1:${MCP_HOST_PORT:-8000}/mcp"
-SERVER_NS="${SERVER_NS:-mcp-server-orders-preview}"
+SERVER_NS="${SERVER_NS:-mcp-server-dev}"
 
 pass() { printf '  PASS  %s\n' "$*"; }
 fail() { printf '  FAIL  %s\n' "$*" >&2; FAILURES=$((${FAILURES:-0} + 1)); }

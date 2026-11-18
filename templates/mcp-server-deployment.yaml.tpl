@@ -65,7 +65,7 @@ spec:
           env:
             - {name: VAULT_SOCKET, value: /run/vault/proxy.sock}
             - {name: DB_CREDS_PATH, value: "database/creds/${ENVIRONMENT}-${APPLICATION}"}
-            - {name: DB_HOST, value: postgres.postgres.svc.cluster.local}
+            - {name: DB_HOST, value: "postgres.postgres-${ENVIRONMENT}.svc.cluster.local"}
             - {name: DB_NAME, value: "${ENVIRONMENT}"}
             # Vault identity tokens: iss = <identity/oidc/config issuer>/v1/identity/oidc, aud = OIDC role client_id
             - {name: MCP_ISSUER, value: "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc"}

@@ -30,7 +30,7 @@ from mcp_lab.vault_client import VaultClient
 
 log = logging.getLogger(__name__)
 
-INSTRUCTIONS = "Read-only access to preview orders. Every call is authorised by the caller's Vault identity group."
+INSTRUCTIONS = "Read-only access to dev orders. Every call is authorised by the caller's Vault identity group."
 
 
 def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwtVerifier) -> MCPServer:
@@ -58,20 +58,20 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
 
     @tool()
     def list_orders(status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        """List preview orders, optionally filtered by status (pending, shipped, cancelled). At most 50 rows."""
+        """List dev orders, optionally filtered by status (pending, shipped, cancelled). At most 50 rows."""
         require("list_orders")
         return tools.list_orders(creds, status, limit)
 
     @tool()
     def get_order(order_id: int) -> dict[str, Any] | None:
-        """Get one preview order by id."""
+        """Get one dev order by id."""
         require("get_order")
         return tools.get_order(creds, order_id)
 
     # Listed so clients see it is refused; annotated destructive so a model client treats it with care
     @tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True), structured_output=False)
     def delete_order(order_id: int) -> None:
-        """Delete one preview order. Always denied: no Vault group is granted it, and orders are read-only."""
+        """Delete one dev order. Always denied: no Vault group is granted it, and orders are read-only."""
         require("delete_order")  # no group in group_tools.toml grants delete_order, so this raises for every caller
         # Defence in depth if a group is ever granted it: there is no DELETE path, and the DB grant is SELECT only.
         raise ToolError(f"permission denied: delete_order is not supported (order {int(order_id)} untouched; orders are read-only)")

@@ -31,7 +31,7 @@ def test_valid_reader_token(vault):
     token = verifier(vault).verify(vault.mint())
     assert token is not None
     assert token.scopes == ["get_order", "list_orders", "whoami"]
-    assert token.client_id == "preview/orders-agent"
+    assert token.client_id == "dev/orders-agent"
     assert token.subject == "entity-1234"
 
 

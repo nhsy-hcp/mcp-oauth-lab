@@ -1,8 +1,8 @@
 [
   {
-    "name": "mcp-server-orders-preview",
+    "name": "mcp-server-dev",
     "application_name": "orders",
-    "environment": "preview",
+    "environment": "dev",
     "team": "ai-platform"
   }
 ]

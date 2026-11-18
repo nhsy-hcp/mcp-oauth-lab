@@ -2,7 +2,7 @@
   {
     "name": "mcp-client-orders-agent",
     "application_name": "orders-agent",
-    "environment": "preview",
+    "environment": "dev",
     "team": "ai-platform",
     "group": "mcp-orders-reader",
     "pod": true,
@@ -11,7 +11,7 @@
   {
     "name": "mcp-client-reporting-agent",
     "application_name": "reporting-agent",
-    "environment": "preview",
+    "environment": "dev",
     "team": "finance",
     "group": "mcp-orders-reporter",
     "pod": true,
@@ -20,7 +20,7 @@
   {
     "name": "mcp-client-laptop",
     "application_name": "laptop",
-    "environment": "preview",
+    "environment": "dev",
     "team": "ai-platform",
     "group": "mcp-orders-reader",
     "pod": false,
@@ -29,7 +29,7 @@
   {
     "name": "mcp-client-unlisted",
     "application_name": "unlisted-agent",
-    "environment": "preview",
+    "environment": "dev",
     "team": "unknown",
     "group": "",
     "pod": true,

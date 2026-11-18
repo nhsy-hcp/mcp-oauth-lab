@@ -48,12 +48,14 @@ bound to loopback only. Vault uses its default mount paths: `auth/kubernetes`, `
 
 | Identity | Namespace / ServiceAccount | Vault auth role | Vault policy | Vault group |
 | --- | --- | --- | --- | --- |
-| MCP server | `mcp-server-orders-preview` / `…-sa` | `mcp-server` | `mcp-server` (templated) | none |
+| MCP server | `mcp-server-dev` / `…-sa` | `mcp-server` | `mcp-server` (templated) | none |
 | Orders agent | `mcp-client-orders-agent` / `…-sa` | `mcp-client` | `mcp-client` | `mcp-orders-reader` |
 | Reporting agent | `mcp-client-reporting-agent` / `…-sa` | `mcp-client` | `mcp-client` | `mcp-orders-reporter` |
 | Laptop (no pod) | `mcp-client-laptop` / `…-sa` | `mcp-client` | `mcp-client` | `mcp-orders-reader` |
 | Unlisted agent | `mcp-client-unlisted` / `…-sa` | `mcp-client` | `mcp-client` | none (fails closed) |
 
+- **Environments:** each environment is meant to have its own server namespace and PostgreSQL instance. The lab
+  deploys only `dev`: `mcp-server-dev` (named in `vault/servers.json`) and `postgres-dev`.
 - **Role bindings:** each auth role is bound by glob. `mcp-server` accepts only `mcp-server-*-sa` in
   `mcp-server-*` namespaces; `mcp-client` accepts only `mcp-client-*-sa` in `mcp-client-*`. Both require token
   audience `vault`.
@@ -95,7 +97,7 @@ A token looks like this:
 
 ```json
 {"iss": "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc", "aud": "mcp-orders", "sub": "<entity id>",
- "exp": 1794924600, "iat": 1794924300, "groups": ["mcp-orders-reader"], "environment": "preview",
+ "exp": 1794924600, "iat": 1794924300, "groups": ["mcp-orders-reader"], "environment": "dev",
  "application_name": "orders-agent", "team": "ai-platform", "namespace": "root"}
 ```
 
@@ -136,11 +138,11 @@ audited. What a group may call is code, changed by pull request and tested.
 ![Dynamic database credentials](images/dynamic-db.png)
 
 The server keeps the pattern from `learn-vault-proxy`. A Vault Proxy native sidecar runs with `role mcp-server`.
-`CredentialManager` reads `database/creds/preview-orders` over the socket, opens a small connection pool, and
+`CredentialManager` reads `database/creds/dev-orders` over the socket, opens a small connection pool, and
 refreshes at two thirds of the lease (capped at 60 seconds). It swaps the pool when the username changes, recovers
 from revocation with `cache-clear`, and on SIGTERM closes the pool and calls `revoke-self`.
 
-The database user inherits `preview_orders_ro`: `USAGE` on schema `orders` and `SELECT` on `orders.items`. Nothing
+The database user inherits `dev_orders_ro`: `USAGE` on schema `orders` and `SELECT` on `orders.items`. Nothing
 else is granted. Schema `payments` in the same database holds a canary that no MCP identity can read.
 
 ## 7. Laptop access

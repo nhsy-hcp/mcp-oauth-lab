@@ -66,7 +66,7 @@ check "list_orders returns rows" wait_for_log mcp-client-orders-agent '.event ==
 
 log "A3-A4  Each side can do exactly one thing in Vault"
 check "A3 server pod cannot mint client tokens (identity/oidc/token/mcp-orders denied)" test "$(proxy_read "${SERVER_NS}" mcp-orders identity/oidc/token/mcp-orders)" = denied
-check "A4 client pod cannot read database credentials" test "$(proxy_read mcp-client-orders-agent mcp-client database/creds/preview-orders)" = denied
+check "A4 client pod cannot read database credentials" test "$(proxy_read mcp-client-orders-agent mcp-client database/creds/dev-orders)" = denied
 
 log "A5  Forged token"
 token="$(scripts/mcp-token.sh)"
@@ -128,14 +128,14 @@ log "A11 Vault audit log: who touched what"
 # Successful responses only (no error), excluding this script's own root-token calls
 ok="$(kubectl logs vault-0 -n vault --since-time="${START}" | grep '^{' \
   | jq -c 'select(.type == "response" and (.error // "") == "" and .auth.display_name != "root") | {p: .request.path, ns: .auth.metadata.service_account_namespace}')"
-db_ns="$(jq -r 'select(.p == "database/creds/preview-orders") | .ns' <<<"${ok}" | sort -u | paste -sd, -)"
+db_ns="$(jq -r 'select(.p == "database/creds/dev-orders") | .ns' <<<"${ok}" | sort -u | paste -sd, -)"
 mint_ns="$(jq -r 'select(.p == "identity/oidc/token/mcp-orders") | .ns' <<<"${ok}" | sort -u | paste -sd, -)"
 # Proxy serves the server's lease from its cache, so there may be no fresh read in this window at all
-check "database credentials issued only to the server (${db_ns:-no new lease in this window})" bash -c '[ -z "$1" ] || [ "$1" = "mcp-server-orders-preview" ]' _ "${db_ns}"
+check "database credentials issued only to the server (${db_ns:-no new lease in this window})" bash -c '[ -z "$1" ] || [ "$1" = "$2" ]' _ "${db_ns}" "${SERVER_NS}"
 check "identity tokens issued only to mcp-client-* identities (${mint_ns})" bash -c '! tr , "\n" <<<"$1" | grep -qv "^mcp-client-"' _ "${mint_ns}"
 denials="$(kubectl logs vault-0 -n vault --since-time="${START}" | grep '^{' | jq -r 'select(.type == "response" and (.error // "" | test("permission denied"))) | "\(.auth.metadata.service_account_namespace) \(.request.path)"' | sort -u)"
 echo "${denials}" | sed 's/^/    denied: /'
-check "A3 and A4 denials are in the audit log" bash -c 'grep -q "^mcp-server-orders-preview identity/oidc/token/mcp-orders$" <<<"$1" && grep -q "^mcp-client-orders-agent database/creds/preview-orders$" <<<"$1"' _ "${denials}"
+check "A3 and A4 denials are in the audit log" bash -c 'grep -q "^$2 identity/oidc/token/mcp-orders$" <<<"$1" && grep -q "^mcp-client-orders-agent database/creds/dev-orders$" <<<"$1"' _ "${denials}" "${SERVER_NS}"
 
 log "A12 Re-running config:mcp-auth after a ServiceAccount is recreated"
 # A recreated SA has a new UID. Simulate it on orders-agent: point its entity's alias at an old UID, then re-run.

@@ -69,10 +69,7 @@ def diagram(name: str, direction: str = "LR", **graph) -> Diagram:
     )
 
 
-def group(
-    title: str, colour: str = ORANGE, fill: str = ORANGE_FILL, labeljust: str = "c"
-) -> Cluster:
-    """labeljust="l" moves the title aside when an edge would cross it."""
+def group(title: str, colour: str = ORANGE, fill: str = ORANGE_FILL) -> Cluster:
     return Cluster(
         title,
         graph_attr={
@@ -83,7 +80,7 @@ def group(
             "fontname": f"{FONT} Bold",
             "fontcolor": colour,
             "fontsize": "15",
-            "labeljust": labeljust,
+            "labeljust": "c",
             "margin": "18",
         },
     )
@@ -103,8 +100,8 @@ def laptop(title: str = "Laptop") -> Cluster:
     return group(title, GREEN, GREEN_FILL)
 
 
-def vault_ns(title: str = "HashiCorp Vault", labeljust: str = "c") -> Cluster:
-    return group(title, GREY, GREY_FILL, labeljust)
+def vault_ns(title: str = "HashiCorp Vault") -> Cluster:
+    return group(title, GREY, GREY_FILL)
 
 
 def data_ns(title: str = "postgres") -> Cluster:
@@ -119,9 +116,9 @@ def same_rank(*nodes: Node) -> None:
             sub.node(node._id)
 
 
-def hidden(a: Node, b: Node) -> None:
+def hidden(a: Node, b: Node, **attrs) -> None:
     """Invisible edge, used only to order nodes."""
-    a >> Edge(style="invis") >> b
+    a >> Edge(style="invis", **attrs) >> b
 
 
 def box(
@@ -208,15 +205,11 @@ def exchange(request: tuple[int, str], reply: tuple[int, str], **attrs) -> Edge:
     return Edge(label=lbl, reverse=True, **attrs)
 
 
-def ref(text: str = "", n: int | None = None, anchor: str = "label", **attrs) -> Edge:
-    """Reference / configuration link (dashed grey).
-
-    anchor="headlabel" or "taillabel" puts the text near one end of the edge; place it with
-    labeldistance and labelangle.
-    """
+def ref(text: str = "", n: int | None = None, **attrs) -> Edge:
+    """Reference / configuration link (dashed grey)."""
     lbl = (
         _badge(n, text, REF)
         if n
         else (f'<<font color="{MUTED}">{text}</font>>' if text else "")
     )
-    return Edge(**{anchor: lbl}, style="dashed", color=REF, **attrs)
+    return Edge(label=lbl, style="dashed", color=REF, **attrs)

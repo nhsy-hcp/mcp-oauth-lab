@@ -29,8 +29,8 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
 - Vault configuration runs as `kubectl exec vault-0 -n vault -- vault ...` through `vault_cmd` / `vault_cmd_in` in
   `scripts/lib.sh`, with the root token read from `vault-init.json` and sent on stdin, never as an argument. Every
   config step must be safe to re-run.
-- Diagrams are PNGs rendered from Python `diagrams` sources in `docs/diagrams/` (`task docs:diagrams`). Never edit
-  the PNGs by hand.
+- Diagrams are PNGs rendered from Python sources in `docs/diagrams/` (`task docs:diagrams`), using `diagrams`, plus
+  matplotlib for the token-flow sequence diagram. Never edit the PNGs by hand.
 
 ## Layout
 

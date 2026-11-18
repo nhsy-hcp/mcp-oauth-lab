@@ -77,7 +77,6 @@ free; otherwise run `task all mcp_host_port=<port>`. Check with `task deps`.
 
 - [Solution design](docs/solution-design.md): identities, policies, token flow, threat model.
 - [Walkthrough](docs/walkthrough.md): every scenario, step by step.
-- [Troubleshooting](docs/troubleshooting.md).
 
 ## Related lab
 

@@ -6,7 +6,7 @@ version: '3'
 # Design: docs/solution-design.md
 
 vars:
-  cluster_name: vault-mcp-lab
+  cluster_name: mcp-oauth-lab
   k3s_image: rancher/k3s:v1.36.6-k3s1
   vault_chart_version: "0.34.1"
   vault_image: hashicorp/vault

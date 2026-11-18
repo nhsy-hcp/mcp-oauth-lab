@@ -19,7 +19,7 @@ app container holds no Vault token.
 
 ![Architecture](images/architecture.png)
 
-**Platform:** k3d (`vault-mcp-lab`), Better Auth 1.7.25, Dex 2.46.1, HashiCorp Vault 2.2.2 (single-node Raft),
+**Platform:** k3d (`mcp-oauth-lab`), Better Auth 1.7.25, Dex 2.46.1, HashiCorp Vault 2.2.2 (single-node Raft),
 PostgreSQL 16 and MCP Python SDK 2.3. All laptop ports are bound to `127.0.0.1`.
 
 | Service | Laptop and pod URL |

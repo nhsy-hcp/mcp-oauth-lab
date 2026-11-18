@@ -33,13 +33,13 @@ pass_if_logged() {
 }
 
 bash -c 'source scripts/lib.sh; kubectl get pods' >/dev/null
-pass_if_logged "--context k3d-vault-mcp-lab get pods" "scripts using lib.sh default to the lab"
+pass_if_logged "--context k3d-mcp-oauth-lab get pods" "scripts using lib.sh default to the lab"
 
 KUBECONTEXT=k3d-other bash -c 'source scripts/lib.sh; kubectl get nodes' >/dev/null
 pass_if_logged "--context k3d-other get nodes" "lib.sh uses KUBECONTEXT"
 
 scripts/config-aliases.sh >/dev/null
-pass_if_logged "--context k3d-vault-mcp-lab rollout status deploy/coredns" "config-aliases.sh targets the lab"
+pass_if_logged "--context k3d-mcp-oauth-lab rollout status deploy/coredns" "config-aliases.sh targets the lab"
 
 scripts/cluster-ready.sh test-cluster >/dev/null
 pass_if_logged "--context k3d-test-cluster wait node" "cluster-ready.sh targets the named cluster"
@@ -55,5 +55,5 @@ for setting in 'KUBECONTEXT: k3d-{{.cluster_name}}' 'HELM_KUBECONTEXT: k3d-{{.cl
 done
 echo "PASS  Taskfile pins kubectl and Helm to the lab"
 
-grep -Eq '^  cluster_name: vault-mcp-lab$' Taskfile.yml || fail "Taskfile cluster_name must match the lib.sh default"
+grep -Eq '^  cluster_name: mcp-oauth-lab$' Taskfile.yml || fail "Taskfile cluster_name must match the lib.sh default"
 echo "PASS  Taskfile cluster_name matches the lib.sh default"

@@ -66,7 +66,7 @@ For Claude Code, also run `claude mcp logout orders`.
 task logs NS=mcp-client-orders-agent      # access_token_issued, tools_listed (4), tool_called ... is_error=false
 task logs NS=mcp-client-reporting-agent   # get_order -> "not permitted"
 task logs NS=mcp-client-unlisted          # mcp_call_failed error=token_unavailable status=401
-kubectl --context k3d-vault-mcp-lab logs -n better-auth deploy/better-auth | grep client_authenticated
+kubectl --context k3d-mcp-oauth-lab logs -n better-auth deploy/better-auth | grep client_authenticated
 ```
 
 ## 5. Who cannot log in (A3, A4, A12)
@@ -95,8 +95,8 @@ scripts/vault.sh lease revoke -prefix database/creds/dev-orders   # server recov
 ## 9. Audit (A11)
 
 ```bash
-kubectl --context k3d-vault-mcp-lab logs -n better-auth deploy/better-auth | grep -E 'client_authenticated|token_issued|token_refused'
-kubectl --context k3d-vault-mcp-lab logs vault-0 -n vault | grep '^{' | jq -c 'select(.type=="response") |
+kubectl --context k3d-mcp-oauth-lab logs -n better-auth deploy/better-auth | grep -E 'client_authenticated|token_issued|token_refused'
+kubectl --context k3d-mcp-oauth-lab logs vault-0 -n vault | grep '^{' | jq -c 'select(.type=="response") |
   {path: .request.path, ns: .auth.metadata.service_account_namespace, error}' | sort | uniq -c
 ```
 

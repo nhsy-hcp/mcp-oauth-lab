@@ -14,7 +14,7 @@ INIT_FILE="${INIT_FILE:-vault-init.json}"
 SERVERS_FILE="${SERVERS_FILE:-vault/servers.json}"
 CLIENTS_FILE="${CLIENTS_FILE:-auth/mcp-clients.json}"
 AUTH_MOUNT="auth/kubernetes"
-KUBECONTEXT="${KUBECONTEXT:-k3d-vault-mcp-lab}" # set by Taskfile.yml; the default is for scripts run directly
+KUBECONTEXT="${KUBECONTEXT:-k3d-mcp-oauth-lab}" # set by Taskfile.yml; the default is for scripts run directly
 
 log() { printf '==> %s\n' "$*"; }
 err() { printf 'ERROR: %s\n' "$*" >&2; }

@@ -1,4 +1,4 @@
-# vault-mcp-identity-lab
+# mcp-oauth-lab
 
 Standard OAuth for an MCP server on a local k3d cluster, using Better Auth, Dex and HashiCorp Vault.
 

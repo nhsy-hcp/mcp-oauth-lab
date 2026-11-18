@@ -21,7 +21,7 @@ with diagram("identity-broker", direction="LR", nodesep="1.0", ranksep="1.6"):
     with client_ns("mcp-client-orders-agent"):
         sa = box("projected SA token", "aud=vault · 10 min · Proxy only")
         proxy_c = box("vault-proxy sidecar", "role mcp-client · token in memory")
-        app_c = icon(Pod, "client app", "VaultIdentityAuth")
+        app_c = icon(Pod, "client app")
     api = icon(APIServer, "k3s API server", "TokenReview + SA annotations")
     with vault_ns():
         auth = box(
@@ -35,7 +35,7 @@ with diagram("identity-broker", direction="LR", nodesep="1.0", ranksep="1.6"):
         jwks = box("identity/oidc/.well-known/keys", "public JWKS (unauthenticated)")
         vault = icon(Vault, "HashiCorp Vault")
     with server_ns("mcp-server-orders-preview"):
-        mcp = icon(Pod, "orders MCP server", "VaultJwtVerifier")
+        mcp = icon(Pod, "orders MCP server")
         proxy_s = box("vault-proxy sidecar", "role mcp-server")
         tools = box("tool check", "groups → {list_orders, get_order, whoami}")
 
@@ -54,7 +54,7 @@ with diagram("identity-broker", direction="LR", nodesep="1.0", ranksep="1.6"):
     mcp >> step(8, "verify sig, iss, aud, exp → allowed tools") >> tools
     (
         note(
-            "No shared secret, nothing long-lived.<br/>Revoke = remove from the Vault group."
+            "No shared secret between client and server.<br/>Revoke = remove from the Vault group."
         )
         >> ref()
         >> grp

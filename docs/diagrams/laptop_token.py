@@ -19,7 +19,7 @@ from diagrams.onprem.security import Vault
 
 with diagram("laptop-token", direction="LR"):
     with laptop("Laptop"):
-        you = icon(User, "scripts/mcp-token.sh", "or .mcp.json headersHelper")
+        you = icon(User, "scripts/<br/>mcp-token.sh", "or .mcp.json\nheadersHelper")
     api = icon(
         APIServer,
         "k3s API server",

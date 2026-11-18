@@ -35,7 +35,7 @@ with diagram("architecture", direction="LR"):
             server = icon(
                 Pod, "orders MCP server", "Streamable HTTP :8080/mcp\nNodePort 30800"
             )
-        with vault_ns("HashiCorp Vault"):
+        with vault_ns():
             vault = icon(
                 Vault,
                 "HashiCorp Vault",

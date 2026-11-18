@@ -5,6 +5,7 @@ from common import (
     data_ns,
     deliver,
     diagram,
+    exchange,
     icon,
     note,
     ref,
@@ -24,7 +25,7 @@ with diagram("dynamic-db", direction="LR"):
             "vault-proxy sidecar",
             "UNIX socket · force auto-auth token\ncaches and renews the lease",
         )
-        app = icon(Pod, "orders MCP server", "CredentialManager")
+        app = icon(Pod, "orders MCP server")
     with vault_ns():
         role = box(
             "auth/kubernetes/role/mcp-server",
@@ -36,7 +37,7 @@ with diagram("dynamic-db", direction="LR"):
         pg = icon(
             PostgreSQL,
             "PostgreSQL preview",
-            "orders.items (SELECT only)\npayments.* (no grant)",
+            "orders.items: SELECT\npayments.*: no grant",
         )
 
     same_rank(sa, proxy, app)
@@ -45,7 +46,10 @@ with diagram("dynamic-db", direction="LR"):
     sa >> step(1, "login") >> proxy >> step(2) >> role
     (
         app
-        >> step(3, "GET /v1/database/creds/... over socket")
+        >> exchange(
+            (3, "GET /v1/database/creds/... over socket"),
+            (5, "username + password (memory only)"),
+        )
         >> proxy
         >> step(4)
         >> creds
@@ -55,7 +59,6 @@ with diagram("dynamic-db", direction="LR"):
         >> ref("CREATE ROLE v-... IN ROLE preview_orders_ro<br/>VALID UNTIL expiry")
         >> pg
     )
-    proxy >> deliver(5, "username + password (memory only)") >> app
     app >> deliver(6, "fixed, parameterised SELECTs") >> pg
     (
         note(

@@ -100,7 +100,7 @@ def laptop(title: str = "Laptop") -> Cluster:
     return group(title, GREEN, GREEN_FILL)
 
 
-def vault_ns(title: str = "HashiCorp Vault · vault-0") -> Cluster:
+def vault_ns(title: str = "HashiCorp Vault") -> Cluster:
     return group(title, GREY, GREY_FILL)
 
 
@@ -160,13 +160,18 @@ def note(text: str, **attrs) -> Node:
     )
 
 
-def _badge(n: int, text: str, colour: str) -> str:
+def _badge_row(n: int, text: str, colour: str) -> str:
     cell = (
         f'<td><table border="0" style="rounded" bgcolor="{colour}" cellpadding="3"><tr><td>'
         f'<font color="white" point-size="12"><b> {n} </b></font></td></tr></table></td>'
     )
     txt = f'<td align="left"> {text}</td>' if text else ""
-    return f'<<table border="0" cellspacing="0" cellpadding="1"><tr>{cell}{txt}</tr></table>>'
+    return f"<tr>{cell}{txt}</tr>"
+
+
+def _badge(n: int, text: str, colour: str) -> str:
+    row = _badge_row(n, text, colour)
+    return f'<<table border="0" cellspacing="0" cellpadding="1">{row}</table>>'
 
 
 def step(n: int, text: str = "", external: bool = False, **attrs) -> Edge:
@@ -187,6 +192,15 @@ def deliver(n: int | None = None, text: str = "", **attrs) -> Edge:
         else (f'<<font color="{GREEN}"><b>{text}</b></font>>' if text else "")
     )
     return Edge(label=lbl, color=GREEN, penwidth="2.2", **attrs)
+
+
+def exchange(request: tuple[int, str], reply: tuple[int, str], **attrs) -> Edge:
+    """Request (blue) and its reply (green) on one two-way edge, so their labels cannot overlap."""
+    gap = "&#160;" * 3  # keeps the curved edge clear of the text
+    rows = _badge_row(request[0], gap + request[1], BLUE)
+    rows += _badge_row(reply[0], gap + reply[1], GREEN)
+    lbl = f'<<table border="0" cellspacing="0" cellpadding="1">{rows}</table>>'
+    return Edge(label=lbl, reverse=True, **attrs)
 
 
 def ref(text: str = "", n: int | None = None, **attrs) -> Edge:

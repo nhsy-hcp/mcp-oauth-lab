@@ -33,11 +33,12 @@ with diagram("laptop-token", direction="LR"):
     with server_ns("MCP server · 127.0.0.1:8000"):
         mcp = icon(Pod, "orders MCP server")
 
-    you >> step(1, "SA token") >> api
-    you >> step(2, "login (JWT on stdin)") >> login
-    you >> step(3, "mint") >> mint
-    you >> step(4) >> revoke
-    you >> deliver(5, "Bearer JWT") >> mcp
+    # tailport: start every edge at the icon, not at the top of the padded node
+    you >> step(1, "SA token", tailport="e") >> api
+    you >> step(2, "login (JWT on stdin)", tailport="e") >> login
+    you >> step(3, "mint", tailport="e") >> mint
+    you >> step(4, tailport="e") >> revoke
+    you >> deliver(5, "Bearer JWT", tailport="e") >> mcp
     (
         note("Root token from .env is never used.<br/>Only the JWT reaches stdout.")
         >> ref()

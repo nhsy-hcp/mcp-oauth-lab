@@ -69,7 +69,10 @@ def diagram(name: str, direction: str = "LR", **graph) -> Diagram:
     )
 
 
-def group(title: str, colour: str = ORANGE, fill: str = ORANGE_FILL) -> Cluster:
+def group(
+    title: str, colour: str = ORANGE, fill: str = ORANGE_FILL, labeljust: str = "c"
+) -> Cluster:
+    """labeljust="l" moves the title aside when an edge would cross it."""
     return Cluster(
         title,
         graph_attr={
@@ -80,7 +83,7 @@ def group(title: str, colour: str = ORANGE, fill: str = ORANGE_FILL) -> Cluster:
             "fontname": f"{FONT} Bold",
             "fontcolor": colour,
             "fontsize": "15",
-            "labeljust": "c",
+            "labeljust": labeljust,
             "margin": "18",
         },
     )
@@ -100,8 +103,8 @@ def laptop(title: str = "Laptop") -> Cluster:
     return group(title, GREEN, GREEN_FILL)
 
 
-def vault_ns(title: str = "HashiCorp Vault") -> Cluster:
-    return group(title, GREY, GREY_FILL)
+def vault_ns(title: str = "HashiCorp Vault", labeljust: str = "c") -> Cluster:
+    return group(title, GREY, GREY_FILL, labeljust)
 
 
 def data_ns(title: str = "postgres") -> Cluster:
@@ -181,6 +184,8 @@ def step(n: int, text: str = "", external: bool = False, **attrs) -> Edge:
     whose midpoint would land on a group border.
     """
     key = "xlabel" if external else "label"
+    if external and text:
+        text += "&#160;" * 3  # keeps the text clear of the edge
     return Edge(**{key: _badge(n, text, BLUE)}, **attrs)
 
 
@@ -195,19 +200,23 @@ def deliver(n: int | None = None, text: str = "", **attrs) -> Edge:
 
 
 def exchange(request: tuple[int, str], reply: tuple[int, str], **attrs) -> Edge:
-    """Request (blue) and its reply (green) on one two-way edge, so their labels cannot overlap."""
-    gap = "&#160;" * 3  # keeps the curved edge clear of the text
+    """Request (blue) and its reply (green) on one two-way edge, with their labels stacked."""
+    gap = "&#160;" * 6  # leaves room for the edge between the badges and the text
     rows = _badge_row(request[0], gap + request[1], BLUE)
     rows += _badge_row(reply[0], gap + reply[1], GREEN)
     lbl = f'<<table border="0" cellspacing="0" cellpadding="1">{rows}</table>>'
     return Edge(label=lbl, reverse=True, **attrs)
 
 
-def ref(text: str = "", n: int | None = None, **attrs) -> Edge:
-    """Reference / configuration link (dashed grey)."""
+def ref(text: str = "", n: int | None = None, anchor: str = "label", **attrs) -> Edge:
+    """Reference / configuration link (dashed grey).
+
+    anchor="headlabel" or "taillabel" puts the text near one end of the edge; place it with
+    labeldistance and labelangle.
+    """
     lbl = (
         _badge(n, text, REF)
         if n
         else (f'<<font color="{MUTED}">{text}</font>>' if text else "")
     )
-    return Edge(label=lbl, style="dashed", color=REF, **attrs)
+    return Edge(**{anchor: lbl}, style="dashed", color=REF, **attrs)

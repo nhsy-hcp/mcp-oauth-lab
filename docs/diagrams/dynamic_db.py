@@ -43,7 +43,7 @@ with diagram("dynamic-db", direction="LR"):
     same_rank(sa, proxy, app)
     same_rank(role, creds)
 
-    sa >> step(1, "login") >> proxy >> step(2) >> role
+    sa >> step(1, "login", external=True) >> proxy >> step(2) >> role
     (
         app
         >> exchange(

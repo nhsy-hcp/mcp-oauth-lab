@@ -26,7 +26,7 @@ with diagram("architecture", direction="LR"):
     with laptop("Laptop"):
         you = icon(User, "Claude Code /<br/>Inspector", "task mcp:token")
 
-    with group("k3d cluster vault-mcp-lab", GREY, "white"):
+    with group("k3d cluster vault-mcp-lab", GREY, "white", labeljust="l"):
         with client_ns("mcp-client-* namespaces"):
             agent = icon(Pod, "orders-agent", "group mcp-orders-reader")
             reporter = icon(Pod, "reporting-agent", "group mcp-orders-reporter")
@@ -35,7 +35,7 @@ with diagram("architecture", direction="LR"):
             server = icon(
                 Pod, "orders MCP server", "Streamable HTTP :8080/mcp\nNodePort 30800"
             )
-        with vault_ns():
+        with vault_ns(labeljust="l"):
             vault = icon(
                 Vault,
                 "HashiCorp Vault",
@@ -54,7 +54,16 @@ with diagram("architecture", direction="LR"):
     agent >> deliver(2, "Bearer JWT") >> server
     reporter >> deliver(2) >> server
     unlisted >> deliver(2) >> server
-    server >> ref("JWKS via own Proxy") >> vault
+    (
+        server
+        >> ref(
+            "JWKS via own Proxy",
+            anchor="headlabel",
+            labeldistance="14",
+            labelangle="-22",
+        )
+        >> vault
+    )
     server >> step(3, "Proxy: database/creds/preview-orders") >> vault
     server >> deliver(4, "10-min SELECT-only user") >> pg
     groups >> ref("groups claim") >> vault

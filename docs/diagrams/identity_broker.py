@@ -42,12 +42,18 @@ with diagram("identity-broker", direction="LR", nodesep="1.0", ranksep="1.6"):
     same_rank(sa, proxy_c, app_c)
     same_rank(auth, grp, oidc, jwks)
 
-    sa >> step(1, "login") >> proxy_c
+    sa >> step(1, "login", external=True) >> proxy_c
     proxy_c >> step(2, "K8s login") >> auth
     auth >> ref("TokenReview") >> api
-    app_c >> step(3, "read token over socket") >> proxy_c
+    app_c >> step(3, "read JWT", external=True) >> proxy_c
     proxy_c >> step(4) >> oidc
-    grp >> ref("groups claim") >> oidc
+    (
+        grp
+        >> ref(
+            "groups claim", anchor="taillabel", labeldistance="7.5", labelangle="-120"
+        )
+        >> oidc
+    )
     oidc >> deliver(5, "JWT: iss, aud, exp, sub, groups") >> app_c
     app_c >> deliver(6, "Authorization: Bearer") >> mcp
     mcp >> step(7, "JWKS (cached, refetch on new kid)") >> proxy_s >> jwks

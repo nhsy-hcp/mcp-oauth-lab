@@ -91,6 +91,7 @@ tasks:
     desc: Run the Bash script tests (no cluster needed)
     cmds:
       - scripts/test-check-deps.sh
+      - scripts/test-ci-act.sh
 
   build:
     desc: Build the mcp-lab image (server and client) and import it into the k3d cluster
@@ -128,7 +129,8 @@ tasks:
       - sh: command -v act
         msg: "act is not installed (brew install act); it runs .github/workflows/ci.yml locally"
     cmds:
-      - act push -j lint -P ubuntu-latest={{.act_image}}
+      # .env holds the Vault root token, and act would otherwise load it into the job container
+      - act push -j lint --env-file /dev/null -P ubuntu-latest={{.act_image}}
 
   clean:
     desc: Delete the k3d cluster, Vault init data and temporary files

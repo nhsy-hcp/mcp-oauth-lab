@@ -51,7 +51,8 @@ jobs:
   e2e:
     name: e2e on k3d
     needs: lint
-    if: ${{ needs.lint.outputs.act != 'true' && github.ref != 'refs/heads/main' }}
+    # Add [skip e2e] to a commit message to skip this job for that push
+    if: ${{ needs.lint.outputs.act != 'true' && github.ref != 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip e2e]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

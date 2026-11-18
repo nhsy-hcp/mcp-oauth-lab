@@ -22,6 +22,7 @@ design is `docs/solution-design.md`.
   `.env.template`. The only exception is the documented public lab password for static Dex users.
 - Stage files by explicit path only, and never use `--no-verify`. Run `task lint` before every commit.
 - Commit messages follow Conventional Commits (`type: description`, lowercase).
+- GitHub runs the e2e job on branch pushes. Add `[skip e2e]` to the commit message to skip it for that push.
 - Use Vault's default mount paths: `auth/kubernetes` and `database/`.
 - Python 3.12 managed with uv (`app/pyproject.toml`); ruff with a 200-character line length. The MCP server talks to
   Vault only through Vault Proxy over the UNIX socket, with the standard library (no `hvac`). Client pods do not use

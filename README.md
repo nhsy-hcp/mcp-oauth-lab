@@ -29,6 +29,9 @@ task init     # pre-commit hooks, Helm repo, .env, Python venv
 task all      # k3d cluster, Vault, PostgreSQL, auth, MCP server, identity broker, client pods
 task test:all # unit tests + live scenarios M1-M8 and A1-A12
 
+# Decode the JWT header and claims (the signature is not printed)
+task mcp:token | jq -R 'split(".")[:2][] | gsub("-"; "+") | gsub("_"; "/") | @base64d | fromjson'
+
 # The header goes to curl on stdin (-H @-), so the token never appears in `ps`
 task mcp:token | sed 's/^/Authorization: Bearer /' | curl -s -X POST localhost:8000/mcp -H @- \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
@@ -40,9 +43,32 @@ task mcp:token | sed 's/^/Authorization: Bearer /' | curl -s -X POST localhost:8
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_order","arguments":{"order_id":1}}}'
 ```
 
-Claude Code picks up `.mcp.json` from the project root. Approve the `orders` server once; it fetches a fresh token
-through `scripts/mcp-headers.sh`. For the MCP Inspector web UI (header pre-set), run `task mcp:inspector`; for
-the Vault UI, run `task ui` (the root token is copied to the clipboard).
+The decode command prints the JWT header and claims. `groups` decides which tools the caller can use, and `exp` is
+5 minutes after `iat`:
+
+```json
+{
+  "alg": "RS256",
+  "kid": "6494e274-9b13-55df-41b5-d2b20b4c3679"
+}
+{
+  "application_name": "laptop",
+  "aud": "mcp-orders",
+  "environment": "preview",
+  "exp": 1794996793,
+  "groups": [
+    "mcp-orders-reader"
+  ],
+  "iat": 1794996493,
+  "iss": "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc",
+  "namespace": "root",
+  "sub": "5bdf0378-4918-3fc2-41a5-e361b0e26f59",
+  "team": "ai-platform"
+}
+```
+
+For the MCP Inspector web UI (header pre-set), run `task mcp:inspector`; for the Vault UI, run `task ui` (the root
+token is copied to the clipboard).
 
 Requirements: Docker or Podman, k3d, kubectl, helm, the vault CLI, jq, uv and task. Port `127.0.0.1:8000` must be
 free; otherwise run `task all mcp_host_port=<port>`. Check with `task deps`.

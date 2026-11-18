@@ -36,6 +36,11 @@ vars:
 dotenv:
   - .env
 
+# Pin lab commands to the lab cluster, whichever kubectl context is selected
+env:
+  KUBECONTEXT: k3d-{{.cluster_name}}
+  HELM_KUBECONTEXT: k3d-{{.cluster_name}}
+
 tasks:
   # ==========================================================================
   # Standard interface
@@ -92,6 +97,7 @@ tasks:
     cmds:
       - scripts/test-check-deps.sh
       - scripts/test-ci-act.sh
+      - scripts/test-kube-context.sh
 
   build:
     desc: Build the mcp-lab image (server and client) and import it into the k3d cluster
@@ -199,11 +205,8 @@ tasks:
   # ==========================================================================
   install:vault:
     desc: Helm install HashiCorp Vault (single-node Raft, NodePort 30820)
-    preconditions:
-      - sh: kubectl config current-context | grep -q '^k3d-{{.cluster_name}}$'
-        msg: kubectl context is not k3d-{{.cluster_name}} - run task cluster:up
     cmds:
-      - kubectl create namespace vault --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl --context "$KUBECONTEXT" create namespace vault --dry-run=client -o yaml | kubectl --context "$KUBECONTEXT" apply -f -
       - >-
         helm upgrade --install vault hashicorp/vault
         --version {{.vault_chart_version}} -n vault
@@ -212,10 +215,10 @@ tasks:
         --set server.image.tag={{.vault_version_tag}}
       - |
         for i in $(seq 1 30); do
-          kubectl get pod vault-0 -n vault >/dev/null 2>&1 && break
+          kubectl --context "$KUBECONTEXT" get pod vault-0 -n vault >/dev/null 2>&1 && break
           sleep 2
         done
-      - kubectl wait --for=jsonpath='{.status.phase}'=Running pod/vault-0 -n vault --timeout=5m
+      - kubectl --context "$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Running pod/vault-0 -n vault --timeout=5m
 
   init:vault:
     desc: Initialise Vault once; writes vault-init.json and .env
@@ -368,16 +371,16 @@ tasks:
     desc: Show cluster, Vault and workload status
     silent: true
     cmds:
-      - kubectl get nodes
-      - kubectl get pods -A -l 'app.kubernetes.io/name in (vault,postgres,mcp-orders,mcp-client)' 2>/dev/null || true
+      - kubectl --context "$KUBECONTEXT" get nodes
+      - kubectl --context "$KUBECONTEXT" get pods -A -l 'app.kubernetes.io/name in (vault,postgres,mcp-orders,mcp-client)' 2>/dev/null || true
       - vault status -address=http://127.0.0.1:8200 || true
 
   logs:
     desc: "Follow logs (NS=mcp-server-orders-preview|mcp-client-orders-agent|..., C=app|vault-proxy)"
     cmds:
-      - kubectl logs -f -n {{.NS | default "mcp-server-orders-preview"}} -l 'app.kubernetes.io/name in (mcp-orders,mcp-client)' -c {{.C | default "app"}}
+      - kubectl --context "$KUBECONTEXT" logs -f -n {{.NS | default "mcp-server-orders-preview"}} -l 'app.kubernetes.io/name in (mcp-orders,mcp-client)' -c {{.C | default "app"}}
 
   logs:vault:
     desc: Follow Vault's audit and server log
     cmds:
-      - kubectl logs -f vault-0 -n vault
+      - kubectl --context "$KUBECONTEXT" logs -f vault-0 -n vault

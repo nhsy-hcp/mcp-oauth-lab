@@ -13,8 +13,9 @@ anyone handing out API keys or client secrets. In this lab, HashiCorp Vault acts
 4. The server reaches its own data with a **10-minute PostgreSQL user** that Vault creates for it. That user has
    `SELECT` on one table and is dropped when the pod stops.
 
-No pod, script or config file holds a long-lived secret. To revoke a client, remove it from a Vault group; its next
-token has no access, and any token it already holds expires within 5 minutes.
+Client pods and the server's app container hold no long-lived secret; the lab's own setup credentials are listed under
+the [demo-only shortcuts](#8-threat-model). To revoke a client, remove it from a Vault group; its next token has no
+access, and any token it already holds expires within 5 minutes.
 
 ![Architecture](images/architecture.png)
 
@@ -27,13 +28,14 @@ bound to loopback only. Vault uses its default mount paths: `auth/kubernetes`, `
 
 **Goals**
 
-- No long-lived credential anywhere. Client JWTs last 5 minutes, Vault tokens 15/30 minutes, database users
-  10/30 minutes, and ServiceAccount tokens 10 minutes.
+- No long-lived credential in client pods or the server's app container. Client JWTs last 5 minutes, Vault tokens
+  15/30 minutes, database users 10/30 minutes, and the ServiceAccount tokens used to log in 10 minutes.
 - Least privilege on both sides:
   - A client may only mint one token type. It cannot read secrets or database credentials.
   - The server may only read its own `database/creds` path. It cannot mint client tokens.
 - Vault decides who may call which tools: identity group membership, held centrally and auditable.
-- The laptop (Claude Code, MCP Inspector, `curl`) uses the same broker, with no static token.
+- The laptop (Claude Code, MCP Inspector, `curl`) uses the same broker, with no static MCP or Vault token. It relies on
+  the operator's kubeconfig (section 7).
 - No Vault client library (`hvac`): the apps talk to Vault Proxy over a UNIX socket with the standard library.
 
 **Non-goals**
@@ -180,6 +182,9 @@ can act as the laptop client.
 - Unseal keys in `vault-init.json`.
 - Single Vault node.
 - `sslmode=disable`.
+- Static PostgreSQL superuser password in a Kubernetes Secret.
+- Non-expiring token-reviewer ServiceAccount token stored in Vault.
+- Laptop access rests on the operator's long-lived kubeconfig.
 
 ## 9. Limits and next steps
 

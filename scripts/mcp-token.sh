@@ -1,5 +1,5 @@
 #!/bin/bash
-# Print a short-lived Vault identity JWT (aud=mcp-orders) for the laptop MCP client. Nothing long-lived is used:
+# Print a short-lived Vault identity JWT (aud=mcp-orders) for the laptop MCP client, using the operator's kubeconfig:
 #   1. a 10-minute ServiceAccount token for mcp-client-laptop-sa (audience vault)
 #   2. Kubernetes-auth login on localhost:8200 -> a Vault token that can only mint this JWT
 #   3. read identity/oidc/token/mcp-orders, then revoke the Vault token straight away
@@ -7,6 +7,9 @@
 #
 # Usage: scripts/mcp-token.sh | sed 's/^/Authorization: Bearer /' | curl -H @- ...   (header on stdin, not argv)
 set -euo pipefail
+
+# shellcheck source=scripts/lib.sh
+source "$(dirname "$0")/lib.sh"
 
 NS="mcp-client-laptop"
 SA="${NS}-sa"

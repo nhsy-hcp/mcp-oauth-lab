@@ -13,9 +13,13 @@ INIT_FILE="${INIT_FILE:-vault-init.json}"
 SERVERS_FILE="${SERVERS_FILE:-vault/servers.json}"
 CLIENTS_FILE="${CLIENTS_FILE:-vault/mcp-clients.json}"
 AUTH_MOUNT="auth/kubernetes"
+KUBECONTEXT="${KUBECONTEXT:-k3d-vault-mcp-lab}" # set by Taskfile.yml; the default is for scripts run directly
 
 log() { printf '==> %s\n' "$*"; }
 err() { printf 'ERROR: %s\n' "$*" >&2; }
+
+# Always target the lab, whichever kubectl context is currently selected.
+kubectl() { command kubectl --context "${KUBECONTEXT}" "$@"; }
 
 # Root token from vault-init.json (demo only; production revokes the root token).
 root_token() {

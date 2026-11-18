@@ -1,4 +1,4 @@
-# vault-mcp-identity-broker
+# vault-mcp-identity-lab
 
 HashiCorp Vault as an identity broker for MCP auth, on a local k3d cluster.
 
@@ -9,8 +9,8 @@ HashiCorp Vault as an identity broker for MCP auth, on a local k3d cluster.
   according to the caller's **Vault identity group**.
 - **The server** reads PostgreSQL as a **10-minute, `SELECT`-only user** that Vault creates for it and drops when
   the pod stops.
-- **No long-lived secret** anywhere: no API keys, client secrets or static Vault tokens. To revoke a client, remove
-  it from a Vault group.
+- **No long-lived secret in client pods or the server's app container**: no API keys, client secrets or static Vault
+  tokens. To revoke a client, remove it from a Vault group.
 
 ![Architecture](docs/images/architecture.png)
 

@@ -13,7 +13,7 @@ node_ready=false
 for i in $(seq 1 "${ATTEMPTS}"); do
   if k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -qx "${CLUSTER_NAME}"; then
     echo "Cluster found. Waiting for node to be Ready..."
-    if kubectl wait node --all --for=condition=Ready --timeout=90s 2>/dev/null; then
+    if kubectl --context "k3d-${CLUSTER_NAME}" wait node --all --for=condition=Ready --timeout=90s 2>/dev/null; then
       echo "Node is Ready."
       node_ready=true
       break
@@ -33,7 +33,7 @@ for deploy in coredns local-path-provisioner; do
   echo "Waiting for kube-system/${deploy} to be available..."
   ready=false
   for i in $(seq 1 "${ATTEMPTS}"); do
-    if kubectl -n kube-system rollout status "deploy/${deploy}" --timeout=60s 2>/dev/null; then
+    if kubectl --context "k3d-${CLUSTER_NAME}" -n kube-system rollout status "deploy/${deploy}" --timeout=60s 2>/dev/null; then
       ready=true
       break
     fi

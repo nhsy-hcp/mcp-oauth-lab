@@ -51,7 +51,8 @@ Or with Claude Code. Approve the project server in `.mcp.json` the first time:
 claude   # then: "Which preview orders are pending, and which database user did the server use?"
 ```
 
-`.mcp.json` runs `scripts/mcp-headers.sh` as a `headersHelper`, so Claude Code always gets a fresh token.
+`.mcp.json` runs `scripts/mcp-headers.sh` as a `headersHelper`. Claude Code reuses the token across calls and gets a new
+one after it expires.
 
 ## 3. Client pods authenticate with nothing but their ServiceAccount (A2, A7, A8)
 

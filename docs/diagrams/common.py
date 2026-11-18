@@ -33,7 +33,8 @@ def label(title: str, detail: str = "") -> str:
 
 def icon(cls, title: str, detail: str = "", **attrs) -> Node:
     """Official icon node; pads the height for each label line so text never overlaps the icon."""
-    lines = 1 + len([line for line in detail.split("\n") if line])
+    title_lines = 1 + title.count("<br/>")
+    lines = title_lines + len([line for line in detail.split("\n") if line])
     return cls(label=label(title, detail), height=str(1.9 + 0.32 * lines), **attrs)
 
 

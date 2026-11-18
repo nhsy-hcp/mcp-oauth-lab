@@ -24,7 +24,7 @@ from diagrams.onprem.security import Vault
 # Grid (LR): clients (laptop + client pods) · MCP server · Vault + PostgreSQL
 with diagram("architecture", direction="LR"):
     with laptop("Laptop"):
-        you = icon(User, "Claude Code / Inspector", "task mcp:token")
+        you = icon(User, "Claude Code /<br/>Inspector", "task mcp:token")
 
     with group("k3d cluster vault-mcp-lab", GREY, "white"):
         with client_ns("mcp-client-* namespaces"):
@@ -38,8 +38,8 @@ with diagram("architecture", direction="LR"):
         with vault_ns():
             vault = icon(
                 Vault,
-                "HashiCorp Vault 2.2.2",
-                "auth/kubernetes · identity/oidc\ndatabase/",
+                "HashiCorp Vault",
+                "auth/kubernetes\nidentity/oidc · database/",
             )
             groups = box("identity groups", "who may call which tools")
         with data_ns():

@@ -1,0 +1,26 @@
+# Dex Helm values. The config, with the static users, is the dex-config Secret from scripts/install-dex.sh.
+replicaCount: 1
+configSecret:
+  create: false
+  name: dex-config
+service:
+  type: NodePort
+  ports:
+    http:
+      nodePort: 30556
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+resources:
+  requests:
+    cpu: 20m
+    memory: 32Mi
+  limits:
+    memory: 128Mi

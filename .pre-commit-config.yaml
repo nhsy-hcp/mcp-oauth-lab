@@ -56,3 +56,17 @@ repos:
         language: system
         entry: ruff format
         types_or: [python, pyi]
+
+      - id: biome
+        name: biome check
+        language: system
+        entry: npm --prefix auth run --silent lint
+        pass_filenames: false
+        files: ^auth/
+
+      - id: tsc
+        name: tsc --noEmit
+        language: system
+        entry: npm --prefix auth run --silent typecheck
+        pass_filenames: false
+        files: ^auth/

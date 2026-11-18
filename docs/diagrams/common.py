@@ -92,7 +92,7 @@ def server_ns(title: str) -> Cluster:
 
 
 def client_ns(title: str) -> Cluster:
-    """MCP client namespace (holds nothing but a short-lived identity JWT)."""
+    """MCP client namespace (holds no secret, only short-lived OAuth tokens)."""
     return group(title, BLUE, BLUE_FILL)
 
 

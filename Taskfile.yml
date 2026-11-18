@@ -1,8 +1,8 @@
 version: '3'
 
-# HashiCorp Vault as an identity broker for MCP auth on k3d:
-# client pods (and the laptop) trade a Kubernetes identity for a short-lived Vault identity JWT;
-# the MCP server verifies it against Vault's JWKS and reads dynamic PostgreSQL credentials via Vault Proxy.
+# OAuth for an MCP server on k3d: people sign in through Better Auth and Dex, and client pods log in with
+# their Kubernetes ServiceAccount. The MCP server verifies Better Auth's JWTs by JWKS, authorises tools by
+# scope, and reads dynamic PostgreSQL credentials from HashiCorp Vault through Vault Proxy.
 # Design: docs/solution-design.md
 
 vars:
@@ -13,6 +13,9 @@ vars:
   vault_version_tag: "2.2.2"
   postgres_image: postgres:16-alpine
   app_image: localhost/mcp-lab:local
+  auth_image: localhost/mcp-lab-auth:local
+  dex_chart_version: "0.26.0"
+  dex_version_tag: v2.46.1
   # MCP Inspector (npx) for task mcp:inspector; v2 needs Node >= 22.19
   inspector_version: "2.13.0"
   # act runner image for ci:act; ubuntu-latest on GitHub is 24.04
@@ -26,12 +29,17 @@ vars:
   token_max_ttl: 30m
   # Laptop port for the MCP server (127.0.0.1 only -> NodePort 30800). Fixed at cluster create time.
   mcp_host_port: "8000"
-  # Lifetime of the Vault identity JWT a client presents to the MCP server (set 1m for the expiry demo)
-  mcp_token_ttl: 5m
+  # Laptop ports for Better Auth and Dex. The Services use the same ports, so pods and the laptop share one URL.
+  auth_host_port: "3000"
+  dex_host_port: "5556"
+  # Lifetime of Better Auth access tokens, in seconds
+  access_token_ttl_seconds: "300"
+  # How long a sign-in can be used before the person must sign in again, in seconds. Refresh does not extend it.
+  sign_in_ttl_seconds: "28800"
   # How often each client pod calls the MCP server
   client_interval_seconds: "20"
-  # A6 (expiry) shortens the identity token TTL to this for one run, then restores mcp_token_ttl
-  demo_token_ttl: 1m
+  # A6 (expiry) shortens the access token TTL to this for one run, in seconds
+  demo_token_ttl_seconds: "20"
 
 dotenv:
   - .env
@@ -51,7 +59,7 @@ tasks:
       - task --list
 
   init:
-    desc: One-time setup - install pre-commit hooks, add Helm repo, create .env, sync app deps
+    desc: One-time setup - install pre-commit hooks, add Helm repos, create .env, sync Python and Node packages
     cmds:
       - task: deps
       - |
@@ -61,9 +69,11 @@ tasks:
           echo "Note: pre-commit not installed, skipping hook install (needed only for task lint)"
         fi
       - helm repo add hashicorp https://helm.releases.hashicorp.com 2>/dev/null || true
-      - helm repo update hashicorp
+      - helm repo add dex https://charts.dexidp.io 2>/dev/null || true
+      - helm repo update hashicorp dex
       - test -f .env || cp .env.template .env
       - uv sync --project app
+      - task: auth:deps
 
   deps:
     desc: Check required CLI tools are installed
@@ -73,21 +83,30 @@ tasks:
       - scripts/check-deps.sh
 
   lint:
-    desc: Run all pre-commit hooks (yamllint, shellcheck, hadolint, ruff) and a full gitleaks scan
+    desc: Run all pre-commit hooks (yamllint, shellcheck, hadolint, ruff, biome, tsc) and a full gitleaks scan
     cmds:
       - scripts/check-deps.sh --lint
+      - task: auth:deps
       - pre-commit run --all-files
       # The pre-commit gitleaks hook only sees staged changes; also scan the full git history.
       - gitleaks git --redact --no-banner
 
   test:
-    desc: Run the mcp-lab unit tests (pytest) and the script tests, no cluster needed
+    desc: Run the Python and Better Auth unit tests and the script tests, no cluster needed
     cmds:
       - task: test:unit
+      - task: test:auth
       - task: test:scripts
 
+  test:auth:
+    desc: Run the Better Auth service unit tests (no cluster needed)
+    dir: auth
+    deps: [auth:deps]
+    cmds:
+      - npm test --silent
+
   test:unit:
-    desc: Run the mcp-lab unit tests (pytest, no cluster needed)
+    desc: Run the Python unit tests (pytest, no cluster needed)
     dir: app
     cmds:
       - uv run --frozen pytest -q
@@ -110,11 +129,12 @@ tasks:
       - rm -f .tmp/mcp-lab.tar
 
   test:all:
-    desc: Unit tests plus live acceptance checks on the running lab (M1-M8, A1-A12)
+    desc: Unit tests plus live acceptance checks on the running lab (M1-M8, A1-A12, H1-H13)
     cmds:
       - task: test
       - task: demo:mcp
       - task: demo:mcp-auth
+      - task: demo:human-auth
 
   test:ci:
     desc: CI pipeline - lint, unit tests and the GitHub lint job under act; with E2E=true also builds the lab and runs test:all
@@ -164,12 +184,15 @@ tasks:
     cmds:
       - task: deps
       - task: cluster:up
+      - task: config:aliases
       - task: install
       - task: install:postgres
       - task: config:db-secret
       - task: config:k8s-auth
+      - task: install:dex
+      - task: config:auth-db
+      - task: auth:deploy
       - task: deploy:mcp-server
-      - task: config:mcp-auth
       - task: deploy:mcp-clients
 
   install:
@@ -184,10 +207,10 @@ tasks:
   # Cluster
   # ==========================================================================
   cluster:up:
-    desc: Create or start the k3d cluster (Vault on localhost:8200, MCP on 127.0.0.1:mcp_host_port)
+    desc: Create or start the k3d cluster (Vault, MCP, Better Auth and Dex on 127.0.0.1)
     aliases: [start, k3d]
     cmds:
-      - scripts/cluster-up.sh {{.cluster_name}} {{.k3s_image}} {{.mcp_host_port}}
+      - scripts/cluster-up.sh {{.cluster_name}} {{.k3s_image}} {{.mcp_host_port}} {{.auth_host_port}} {{.dex_host_port}}
       - scripts/cluster-ready.sh {{.cluster_name}}
 
   cluster:stop:
@@ -262,7 +285,70 @@ tasks:
       - scripts/vault.sh lease revoke -prefix database/creds/
 
   # ==========================================================================
-  # MCP server identity (auth/kubernetes) and deployment
+  # Better Auth and Dex
+  # ==========================================================================
+  config:aliases:
+    desc: CoreDNS aliases so pods reach auth.localhost and dex.localhost
+    cmds:
+      - scripts/config-aliases.sh
+
+  install:dex:
+    desc: Deploy Dex with static users (testuser, reportuser, nogroupuser) and create the Better Auth Secret
+    cmds:
+      - scripts/install-dex.sh {{.dex_chart_version}} {{.dex_version_tag}} {{.dex_host_port}} {{.auth_host_port}}
+
+  config:auth-db:
+    desc: Create Better Auth's database and owner in PostgreSQL
+    cmds:
+      - scripts/config-auth-db.sh
+
+  auth:deps:
+    desc: Install the Better Auth service's npm packages
+    dir: auth
+    status:
+      - test node_modules/.package-lock.json -nt package-lock.json
+    cmds:
+      - npm ci --ignore-scripts --no-audit --no-fund
+
+  auth:build:
+    desc: Build the Better Auth image and import it into the k3d cluster
+    run: once
+    cmds:
+      - mkdir -p .tmp
+      - "{{.container_cli}} build -t {{.auth_image}} auth"
+      - "{{.container_cli}} save -o .tmp/mcp-lab-auth.tar {{.auth_image}}"
+      - k3d image import .tmp/mcp-lab-auth.tar -c {{.cluster_name}}
+      - rm -f .tmp/mcp-lab-auth.tar
+
+  auth:migrate:
+    desc: Run Better Auth database migrations as a Kubernetes Job
+    env: &auth-env
+      AUTH_IMAGE: "{{.auth_image}}"
+      AUTH_HOST_PORT: "{{.auth_host_port}}"
+      DEX_HOST_PORT: "{{.dex_host_port}}"
+      MCP_HOST_PORT: "{{.mcp_host_port}}"
+      ACCESS_TOKEN_TTL_SECONDS: "{{.access_token_ttl_seconds}}"
+      SIGN_IN_TTL_SECONDS: "{{.sign_in_ttl_seconds}}"
+    cmds:
+      - task: auth:build
+      - scripts/deploy-auth.sh migrate
+
+  auth:seed-clients:
+    desc: Create or correct the OAuth clients as a Kubernetes Job
+    env: *auth-env
+    cmds:
+      - task: auth:build
+      - scripts/deploy-auth.sh seed
+
+  auth:deploy:
+    desc: Build Better Auth, migrate, seed clients and deploy (http://localhost:{{.auth_host_port}})
+    env: *auth-env
+    cmds:
+      - task: auth:build
+      - scripts/deploy-auth.sh all
+
+  # ==========================================================================
+  # MCP server: Vault login (auth/kubernetes) and deployment
   # ==========================================================================
   config:k8s-auth:
     desc: auth/kubernetes (annotations as alias metadata), templated mcp-server policy and role
@@ -276,47 +362,35 @@ tasks:
     cmds:
       - task: build
       - >-
-        MCP_HOST_PORT={{.mcp_host_port}}
+        MCP_HOST_PORT={{.mcp_host_port}} AUTH_HOST_PORT={{.auth_host_port}}
         scripts/deploy-workloads.sh vault/servers.json mcp-server-deployment mcp-orders mcp-server
         {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
 
   # ==========================================================================
-  # Identity broker: Vault identity tokens for MCP clients
+  # MCP clients
   # ==========================================================================
-  config:mcp-auth:
-    desc: identity/oidc key + role mcp-orders, mcp-client policy and role, client entities and groups
-    preconditions:
-      - test -f vault-init.json
-    cmds:
-      - scripts/config-mcp-auth.sh {{.mcp_token_ttl}} {{.token_ttl}} {{.token_max_ttl}}
-
   deploy:mcp-clients:
-    desc: Deploy the MCP client pods (orders-agent, reporting-agent, unlisted); the laptop client has no pod
+    desc: Deploy the MCP client pods (orders-agent, reporting-agent, unlisted)
     cmds:
       - task: build
       - >-
-        CLIENT_INTERVAL_SECONDS={{.client_interval_seconds}}
-        scripts/deploy-workloads.sh vault/mcp-clients.json mcp-client-deployment mcp-client mcp-client
-        {{.app_image}} {{.vault_image}}:{{.vault_version_tag}}
+        CLIENT_INTERVAL_SECONDS={{.client_interval_seconds}} MCP_HOST_PORT={{.mcp_host_port}} AUTH_HOST_PORT={{.auth_host_port}}
+        scripts/deploy-workloads.sh auth/mcp-clients.json mcp-client-deployment mcp-client none
+        {{.app_image}} none
 
-  mcp:token:
-    desc: Print a short-lived Vault identity JWT for the laptop client (mcp-client-laptop ServiceAccount)
+  mcp:login:
+    desc: "Print an access token for a lab user without a browser (LAB_USER=testuser)"
     silent: true
     cmds:
-      - scripts/mcp-token.sh
+      - AUTH_HOST_PORT={{.auth_host_port}} MCP_HOST_PORT={{.mcp_host_port}} scripts/oauth-login.sh {{.LAB_USER | default "testuser"}}
 
   mcp:inspector:
-    desc: Open the MCP Inspector web UI on the MCP server, Authorization header pre-set with a fresh 5-minute JWT
+    desc: Open the MCP Inspector web UI on the MCP server, with OAuth sign-in
     preconditions:
       - sh: command -v npx >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=19)?0:1)'
         msg: "mcp:inspector needs npx and Node >= 22.19 (Inspector v2)"
     cmds:
       - scripts/mcp-inspector.sh {{.inspector_version}} http://localhost:{{.mcp_host_port}}/mcp
-
-  mcp:inspector:refresh:
-    desc: Write a new 5-minute JWT for the running mcp:inspector (then reconnect in the UI)
-    cmds:
-      - scripts/mcp-inspector.sh --refresh
 
   # ==========================================================================
   # Vault UI (root token, demo only; macOS: pbcopy and open)
@@ -349,12 +423,20 @@ tasks:
   demo:mcp:
     desc: M1-M8 - the MCP server's own short-lived, least-privileged database access
     cmds:
-      - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp.sh
+      - MCP_HOST_PORT={{.mcp_host_port}} AUTH_HOST_PORT={{.auth_host_port}} scripts/demo-mcp.sh
 
   demo:mcp-auth:
-    desc: A1-A12 - Vault as identity broker - 401s, forged/expired tokens, group-based tools, central revoke, audit
+    desc: A1-A12 - pod login - 401s, forged/expired tokens, scope limits, central revoke, audit
     cmds:
-      - MCP_HOST_PORT={{.mcp_host_port}} scripts/demo-mcp-auth.sh {{.mcp_token_ttl}} {{.demo_token_ttl}} {{.token_ttl}} {{.token_max_ttl}}
+      - >-
+        MCP_HOST_PORT={{.mcp_host_port}} AUTH_HOST_PORT={{.auth_host_port}}
+        ACCESS_TOKEN_TTL_SECONDS={{.access_token_ttl_seconds}}
+        scripts/demo-mcp-auth.sh {{.demo_token_ttl_seconds}}
+
+  demo:human-auth:
+    desc: H1-H13 - people sign in through Better Auth and Dex and get only what their groups allow
+    cmds:
+      - MCP_HOST_PORT={{.mcp_host_port}} AUTH_HOST_PORT={{.auth_host_port}} SIGN_IN_TTL_SECONDS={{.sign_in_ttl_seconds}} scripts/demo-human-auth.sh
 
   docs:diagrams:
     desc: Render the doc diagrams (docs/diagrams/*.py -> docs/images/*.png); needs uv and Graphviz
@@ -362,7 +444,7 @@ tasks:
     cmds:
       - |
         unset VIRTUAL_ENV  # use docs/diagrams/.venv, not an outer activated venv
-        for f in architecture identity_broker dynamic_db laptop_token; do
+        for f in architecture token_flow dynamic_db human_login; do
           echo "Rendering ${f}..."
           uv run --frozen python "${f}.py"
         done
@@ -372,7 +454,7 @@ tasks:
     silent: true
     cmds:
       - kubectl --context "$KUBECONTEXT" get nodes
-      - kubectl --context "$KUBECONTEXT" get pods -A -l 'app.kubernetes.io/name in (vault,postgres,mcp-orders,mcp-client)' 2>/dev/null || true
+      - kubectl --context "$KUBECONTEXT" get pods -A -l 'app.kubernetes.io/name in (vault,postgres,better-auth,dex,mcp-orders,mcp-client)' 2>/dev/null || true
       - vault status -address=http://127.0.0.1:8200 || true
 
   logs:

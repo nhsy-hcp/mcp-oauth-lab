@@ -3,7 +3,10 @@
     "orders": {
       "type": "http",
       "url": "http://localhost:8000/mcp",
-      "headersHelper": "scripts/mcp-headers.sh"
+      "oauth": {
+        "clientId": "claude-code",
+        "callbackPort": 33418
+      }
     }
   }
 }

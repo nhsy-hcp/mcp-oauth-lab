@@ -12,7 +12,7 @@ VAULT_POD="${VAULT_POD:-vault-0}"
 POSTGRES_NS="postgres-dev" # fixed: vault/postgres/postgres.yaml and DB_HOST use this name too
 INIT_FILE="${INIT_FILE:-vault-init.json}"
 SERVERS_FILE="${SERVERS_FILE:-vault/servers.json}"
-CLIENTS_FILE="${CLIENTS_FILE:-vault/mcp-clients.json}"
+CLIENTS_FILE="${CLIENTS_FILE:-auth/mcp-clients.json}"
 AUTH_MOUNT="auth/kubernetes"
 KUBECONTEXT="${KUBECONTEXT:-k3d-vault-mcp-lab}" # set by Taskfile.yml; the default is for scripts run directly
 
@@ -76,7 +76,10 @@ auth_accessor() {
 
 # --- MCP helpers (demo scripts) --------------------------------------------------------------------
 MCP_URL="http://127.0.0.1:${MCP_HOST_PORT:-8000}/mcp"
+MCP_RESOURCE="http://localhost:${MCP_HOST_PORT:-8000}/mcp"
 SERVER_NS="${SERVER_NS:-mcp-server-dev}"
+AUTH_ISSUER="http://localhost:${AUTH_HOST_PORT:-3000}/api/auth"
+SA_ASSERTION_TYPE="urn:lab:params:oauth:client-assertion-type:kubernetes-service-account"
 
 pass() { printf '  PASS  %s\n' "$*"; }
 fail() { printf '  FAIL  %s\n' "$*" >&2; FAILURES=$((${FAILURES:-0} + 1)); }
@@ -118,4 +121,36 @@ proxy_read() {
   else
     echo error
   fi
+}
+
+# Run one SQL statement in Better Auth's database. Usage: auth_sql <sql>
+auth_sql() {
+  kubectl exec -i deploy/postgres -n "${POSTGRES_NS}" -- psql -q -U postgres -d auth -Atc "$1"
+}
+
+# Decoded payload of a JWT. Usage: jwt_payload <jwt>
+jwt_payload() {
+  local p="${1#*.}"
+  p="${p%%.*}"
+  p="$(printf '%s' "${p}" | tr '_-' '/+')"
+  case $((${#p} % 4)) in
+    2) p="${p}==" ;;
+    3) p="${p}=" ;;
+  esac
+  printf '%s' "${p}" | openssl base64 -d -A
+}
+
+# A short-lived ServiceAccount token for <namespace>'s <namespace>-sa. Usage: sa_assertion <namespace> [audience]
+sa_assertion() {
+  kubectl create token "$1-sa" -n "$1" --audience "${2:-${AUTH_ISSUER}}" --duration 10m
+}
+
+# client_credentials request with a ServiceAccount JWT; prints the JSON response. Usage: machine_token <jwt> [scope]
+machine_token() {
+  local scope=()
+  [ -z "${2:-}" ] || scope=(--data-urlencode "scope=$2")
+  # The JWT goes to curl on stdin, never on its command line.
+  printf '%s' "$1" | curl -s --noproxy '*' -m 15 "${AUTH_ISSUER}/oauth2/token" \
+    --data-urlencode 'grant_type=client_credentials' --data-urlencode "client_assertion_type=${SA_ASSERTION_TYPE}" \
+    --data-urlencode 'client_assertion@-' --data-urlencode "resource=${MCP_RESOURCE}" ${scope[@]+"${scope[@]}"}
 }

@@ -1,26 +1,24 @@
-"""Verify Vault identity JWTs on the MCP server and authorise tools by Vault identity group.
+"""Verify OAuth access tokens on the MCP server and authorise tools by scope.
 
-Vault is the identity broker: a client logs in with its Kubernetes ServiceAccount, reads
-``identity/oidc/token/<role>`` and sends the JWT as a bearer token. This module checks it:
+Better Auth decides who gets which scope and signs the token. This server is the resource server:
 
-* signature against Vault's JWKS (``identity/oidc/.well-known/keys``), read through the server's own
-  Vault Proxy socket - so the MCP pod needs no network path to Vault and holds no Vault credential;
-* ``RS256`` only, ``iss``, ``aud``, ``exp`` and ``iat`` required;
-* the ``groups`` claim (from ``{{identity.entity.groups.names}}``) mapped through ``group_tools.toml``,
-  shipped inside this package and read by :func:`packaged_group_tools`.
+* signature against the issuer's JWKS, with ES256 pinned;
+* ``typ=at+jwt``, ``iss``, ``aud``, ``exp``, ``iat``, ``sub``, ``azp`` and ``scope``;
+* the ``scope`` claim mapped to tools through ``scope_tools.toml``, shipped inside this package and
+  read by :func:`packaged_scope_tools`.
 
-Who is in a group is decided in Vault (``identity/group``); what a group may call is that versioned
-file, baked into the image. ServiceAccount annotations only feed informational claims and never grant a tool. A token
-with no known group fails closed (401). The token itself is never logged or forwarded.
+A token with no known scope fails closed (401). The token itself is never logged or forwarded.
 """
 
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import threading
 import time
 import tomllib
+import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from importlib import resources
 from types import MappingProxyType
@@ -36,119 +34,125 @@ from mcp_lab.logging_setup import log_event
 
 log = logging.getLogger(__name__)
 
-JWKS_PATH = "identity/oidc/.well-known/keys"
-ALGORITHMS = ["RS256"]
-GROUP_TOOLS_FILE = "group_tools.toml"
-# Tools no group may ever be granted, whatever the file says. delete_order also refuses on its own.
+ALGORITHMS = ["ES256"]
+AT_JWT_TYP = "at+jwt"
+JWKS_TIMEOUT_SECONDS = 5
+SCOPE_TOOLS_FILE = "scope_tools.toml"
+# Tools no scope may ever grant, whatever the file says. delete_order also refuses on its own.
 NEVER_GRANTED = frozenset({"delete_order"})
-
-
-class GroupToolsError(ValueError):
-    """``group_tools.toml`` is unreadable, malformed, or grants a tool it must not."""
-
-
-def _name(value: Any, what: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: {what} must be a non-empty string without surrounding spaces, got {value!r}")
-    return value
-
-
-def load_group_tools(text: str | None = None) -> Mapping[str, frozenset[str]]:
-    """Parse the group -> tools map (the packaged file unless ``text`` is given). Raises :class:`GroupToolsError`."""
-    try:
-        if text is None:
-            text = resources.files("mcp_lab").joinpath(GROUP_TOOLS_FILE).read_text(encoding="utf-8")
-        data = tomllib.loads(text)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: {exc}") from exc
-    groups = data.get("groups")
-    if not isinstance(groups, dict) or not groups:
-        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: a non-empty [groups] table is required")
-    result: dict[str, frozenset[str]] = {}
-    for group, tools in groups.items():
-        _name(group, "group name")
-        if not isinstance(tools, list):
-            raise GroupToolsError(f"{GROUP_TOOLS_FILE}: group {group!r} must map to a list of tool names")
-        names = [_name(tool, f"tool in group {group!r}") for tool in tools]
-        if len(set(names)) != len(names):
-            raise GroupToolsError(f"{GROUP_TOOLS_FILE}: group {group!r} lists a tool twice")
-        result[group] = frozenset(names)
-    return MappingProxyType(result)
-
-
-@functools.cache
-def packaged_group_tools() -> Mapping[str, frozenset[str]]:
-    """Vault group -> tools it may call, from the packaged file. Membership lives in Vault; the tool set is reviewed here."""
-    return load_group_tools()
-
-
-def check_group_tools(group_tools: Mapping[str, frozenset[str]], registered: Iterable[str]) -> None:
-    """Fail closed at startup if the map grants a forbidden tool, or one the server does not register (a typo would silently deny)."""
-    granted = set().union(*group_tools.values())
-    forbidden = sorted(granted & NEVER_GRANTED)
-    if forbidden:
-        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: tool(s) must never be granted: {', '.join(forbidden)}")
-    unknown = sorted(granted - set(registered))
-    if unknown:
-        raise GroupToolsError(f"{GROUP_TOOLS_FILE}: unknown tool(s) {', '.join(unknown)}")
-
-
 # Never fetch JWKS more often than this, whether the last attempt worked or not: a stream of forged kids,
-# or Vault being down, must not hammer Vault or queue requests behind a slow fetch.
+# or the issuer being down, must not hammer it or queue requests behind a slow fetch.
 MIN_REFRESH_SECONDS = 10.0
 
-# (status, headers, json body) - the shape of VaultClient.read
-VaultRead = Callable[[str], tuple[int, Any, Any]]
+
+class ScopeToolsError(ValueError):
+    """``scope_tools.toml`` is unreadable, malformed, or grants a tool it must not."""
 
 
 class JwksUnavailable(Exception):
     pass
 
 
-def tools_for_groups(groups: Any, group_tools: Mapping[str, frozenset[str]] | None = None) -> frozenset[str]:
-    if group_tools is None:
-        group_tools = packaged_group_tools()
-    if not isinstance(groups, list):
-        return frozenset()
+class ToolAccessToken(AccessToken):
+    """An access token plus the tools its scopes allow."""
+
+    tools: frozenset[str] = frozenset()
+
+
+def _name(value: Any, what: str) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: {what} must be a non-empty string without surrounding spaces, got {value!r}")
+    return value
+
+
+def load_scope_tools(text: str | None = None) -> Mapping[str, frozenset[str]]:
+    """Parse the scope -> tools map (the packaged file unless ``text`` is given). Raises :class:`ScopeToolsError`."""
+    try:
+        if text is None:
+            text = resources.files("mcp_lab").joinpath(SCOPE_TOOLS_FILE).read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: {exc}") from exc
+    scopes = data.get("scopes")
+    if not isinstance(scopes, dict) or not scopes:
+        raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: a non-empty [scopes] table is required")
+    result: dict[str, frozenset[str]] = {}
+    for scope, tools in scopes.items():
+        _name(scope, "scope name")
+        if not isinstance(tools, list):
+            raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: scope {scope!r} must map to a list of tool names")
+        names = [_name(tool, f"tool in scope {scope!r}") for tool in tools]
+        if len(set(names)) != len(names):
+            raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: scope {scope!r} lists a tool twice")
+        result[scope] = frozenset(names)
+    return MappingProxyType(result)
+
+
+@functools.cache
+def packaged_scope_tools() -> Mapping[str, frozenset[str]]:
+    """OAuth scope -> tools it allows, from the packaged file."""
+    return load_scope_tools()
+
+
+def check_scope_tools(scope_tools: Mapping[str, frozenset[str]], registered: Iterable[str]) -> None:
+    """Fail closed at startup if the map grants a forbidden tool, or one the server does not register (a typo would silently deny)."""
+    granted = set().union(*scope_tools.values())
+    forbidden = sorted(granted & NEVER_GRANTED)
+    if forbidden:
+        raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: tool(s) must never be granted: {', '.join(forbidden)}")
+    unknown = sorted(granted - set(registered))
+    if unknown:
+        raise ScopeToolsError(f"{SCOPE_TOOLS_FILE}: unknown tool(s) {', '.join(unknown)}")
+
+
+def tools_for_scopes(scopes: Iterable[str], scope_tools: Mapping[str, frozenset[str]] | None = None) -> frozenset[str]:
+    if scope_tools is None:
+        scope_tools = packaged_scope_tools()
     allowed: set[str] = set()
-    for group in groups:
-        if isinstance(group, str):
-            allowed |= group_tools.get(group, frozenset())
+    for scope in scopes:
+        allowed |= scope_tools.get(scope, frozenset())
     return frozenset(allowed)
 
 
-class VaultJwtVerifier:
-    """``mcp`` TokenVerifier for Vault identity tokens. Returns ``None`` for every rejection (401)."""
+def fetch_jwks_url(url: str) -> dict[str, Any]:
+    """Read a JWKS over HTTP. Proxies are ignored: this is an in-cluster request."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url, timeout=JWKS_TIMEOUT_SECONDS) as response:
+        try:
+            body = json.load(response)
+        except ValueError as exc:
+            raise JwksUnavailable("jwks is not JSON") from exc
+    if not isinstance(body, dict):
+        raise JwksUnavailable("jwks is not an object")
+    return body
+
+
+class OAuthJwtVerifier:
+    """``mcp`` TokenVerifier for Better Auth access tokens. Returns ``None`` for every rejection (401)."""
 
     def __init__(
         self,
-        vault_read: VaultRead,
+        jwks_fetch: Callable[[], dict[str, Any]],
         issuer: str,
         audience: str,
-        group_tools: Mapping[str, frozenset[str]] | None = None,
+        scope_tools: Mapping[str, frozenset[str]] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._read = vault_read
+        self._jwks_fetch = jwks_fetch
         self.issuer = issuer
         self.audience = audience
-        self.group_tools = packaged_group_tools() if group_tools is None else group_tools
+        self.scope_tools = packaged_scope_tools() if scope_tools is None else scope_tools
         self._clock = clock
         self._jwks: jwt.PyJWKSet | None = None
         self._attempted_at = float("-inf")
         self._lock = threading.Lock()
-
-    def _fetch_jwks(self) -> jwt.PyJWKSet:
-        status, _, body = self._read(JWKS_PATH)
-        if status != 200 or not isinstance(body, dict):
-            raise JwksUnavailable(f"jwks status {status}")
-        return jwt.PyJWKSet.from_dict(body)
 
     def signing_key(self, kid: str | None) -> jwt.PyJWK | None:
         """Key for ``kid``; fetches JWKS when the kid is unknown (first use, key rotation).
 
         At most one attempt per :data:`MIN_REFRESH_SECONDS`, counted from the attempt rather than a
         success, so failures are throttled too. The lock only guards the cache; the fetch runs outside
-        it, so a hanging Vault never blocks verification of tokens whose key is already cached.
+        it, so a hanging issuer never blocks verification of tokens whose key is already cached.
         """
         if not kid:
             return None
@@ -158,7 +162,7 @@ class VaultJwtVerifier:
             if key is not None or now - self._attempted_at < MIN_REFRESH_SECONDS:
                 return key
             self._attempted_at = now
-        jwks = self._fetch_jwks()
+        jwks = jwt.PyJWKSet.from_dict(self._jwks_fetch())
         with self._lock:
             self._jwks = jwks
             return self._find(kid)
@@ -172,11 +176,13 @@ class VaultJwtVerifier:
         return None
 
     def verify(self, token: str) -> AccessToken | None:
-        """Synchronous core of :meth:`verify_token` (blocking socket I/O on a JWKS refetch)."""
+        """Synchronous core of :meth:`verify_token` (blocking network I/O on a JWKS refetch)."""
         try:
             header = jwt.get_unverified_header(token)
             if header.get("alg") not in ALGORITHMS:
                 raise jwt.InvalidAlgorithmError("unexpected alg")
+            if header.get("typ") != AT_JWT_TYP:
+                raise jwt.InvalidTokenError("not an access token")
             key = self.signing_key(header.get("kid"))
             if key is None:
                 raise jwt.InvalidKeyError("unknown kid")
@@ -186,21 +192,25 @@ class VaultJwtVerifier:
                 algorithms=ALGORITHMS,
                 audience=self.audience,
                 issuer=self.issuer,
-                options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+                options={"require": ["exp", "iat", "iss", "aud", "sub", "azp", "scope"]},
             )
+            if not isinstance(claims["azp"], str) or not claims["azp"] or not isinstance(claims["scope"], str):
+                raise jwt.InvalidTokenError("malformed azp or scope")
         except (jwt.PyJWTError, JwksUnavailable, OSError) as exc:
             log_event(log, logging.WARNING, "token_rejected", reason=type(exc).__name__)
             return None
-        tools = tools_for_groups(claims.get("groups"), self.group_tools)
-        who = f"{claims.get('environment')}/{claims.get('application_name')}"
+        scopes = sorted(scope for scope in claims["scope"].split() if scope in self.scope_tools)
+        tools = tools_for_scopes(scopes, self.scope_tools)
+        client = claims["azp"]
         if not tools:
-            log_event(log, logging.WARNING, "token_rejected", reason="no_allowed_group", sub=claims.get("sub"), client=who, groups=claims.get("groups"))
+            log_event(log, logging.WARNING, "token_rejected", reason="no_allowed_scope", sub=claims["sub"], client=client)
             return None
-        log_event(log, logging.INFO, "token_accepted", sub=claims.get("sub"), client=who, groups=claims.get("groups"), tools=sorted(tools))
-        return AccessToken(
+        log_event(log, logging.INFO, "token_accepted", sub=claims["sub"], user=claims.get("preferred_username"), client=client, scopes=scopes, tools=sorted(tools))
+        return ToolAccessToken(
             token=token,
-            client_id=who,
-            scopes=sorted(tools),
+            client_id=client,
+            scopes=scopes,
+            tools=tools,
             expires_at=int(claims["exp"]),
             resource=self.audience,
             subject=claims["sub"],
@@ -212,9 +222,9 @@ class VaultJwtVerifier:
 
 
 def require(tool: str) -> AccessToken:
-    """First line of every tool: the caller's Vault group must allow ``tool``."""
+    """First line of every tool: the caller's token scopes must allow ``tool``."""
     token = get_access_token()
-    if token is None or tool not in token.scopes:
+    if not isinstance(token, ToolAccessToken) or tool not in token.tools:
         log_event(log, logging.WARNING, "tool_denied", tool=tool, client=token.client_id if token else None)
         raise ToolError(f"permission denied: {tool} is not permitted for this client")
     return token

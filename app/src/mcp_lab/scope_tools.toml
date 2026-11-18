@@ -1,0 +1,10 @@
+# OAuth scope -> MCP tools it allows.
+#
+# Who receives a scope is decided by the authorization server. What a scope allows is decided here, in
+# this file, which ships inside the mcp_lab package: a change needs a reviewed commit and an image rebuild.
+# The server refuses to start if this file is malformed, names a tool it does not register, or grants delete_order.
+
+[scopes]
+"orders:list" = ["list_orders"]
+"orders:get" = ["get_order"]
+whoami = ["whoami"]

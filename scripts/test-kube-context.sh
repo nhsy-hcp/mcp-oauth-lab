@@ -38,8 +38,8 @@ pass_if_logged "--context k3d-vault-mcp-lab get pods" "scripts using lib.sh defa
 KUBECONTEXT=k3d-other bash -c 'source scripts/lib.sh; kubectl get nodes' >/dev/null
 pass_if_logged "--context k3d-other get nodes" "lib.sh uses KUBECONTEXT"
 
-scripts/mcp-token.sh >/dev/null
-pass_if_logged "--context k3d-vault-mcp-lab create token" "mcp-token.sh targets the lab"
+scripts/config-aliases.sh >/dev/null
+pass_if_logged "--context k3d-vault-mcp-lab rollout status deploy/coredns" "config-aliases.sh targets the lab"
 
 scripts/cluster-ready.sh test-cluster >/dev/null
 pass_if_logged "--context k3d-test-cluster wait node" "cluster-ready.sh targets the named cluster"

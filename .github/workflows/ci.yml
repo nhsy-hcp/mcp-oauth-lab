@@ -20,7 +20,7 @@ jobs:
   lint:
     name: lint and unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       act: ${{ steps.runner.outputs.act }}
     steps:
@@ -34,6 +34,10 @@ jobs:
         run: echo "act=${ACT:-false}" >>"$GITHUB_OUTPUT"
 
       - uses: arduino/setup-task@v2
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
 
       - name: Install tools
         run: scripts/ci-install-tools.sh
@@ -49,11 +53,15 @@ jobs:
     needs: lint
     if: ${{ needs.lint.outputs.act != 'true' && github.ref != 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
 
       - uses: arduino/setup-task@v2
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
 
       - name: Install tools
         run: scripts/ci-install-tools.sh --e2e
@@ -76,10 +84,16 @@ jobs:
               mcp-client-reporting-agent/mcp-client mcp-client-unlisted/mcp-client; do
               ns="${pair%/*}"; deploy="${pair#*/}"
               echo "### ${ns}"; echo '```'
-              kubectl logs -n "${ns}" "deploy/${deploy}" -c vault-proxy --tail=50 || true
+              if [ "${ns}" = mcp-server-dev ]; then
+                kubectl logs -n "${ns}" "deploy/${deploy}" -c vault-proxy --tail=50 || true
+              fi
               kubectl logs -n "${ns}" "deploy/${deploy}" -c app --tail=50 || true
               echo '```'
             done
+            echo '### Better Auth and Dex'; echo '```'
+            kubectl logs -n better-auth deploy/better-auth --tail=50 || true
+            kubectl logs -n dex deploy/dex --tail=50 || true
+            echo '```'
             echo '### Events'; echo '```'
             kubectl get events -A --sort-by='.lastTimestamp' | tail -50 || true
             echo '```'

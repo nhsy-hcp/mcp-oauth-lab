@@ -44,7 +44,7 @@ curl -sSfLo /tmp/hadolint \
   "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-${HADOLINT_ARCH}"
 ${SUDO} install /tmp/hadolint "${BIN_DIR}/hadolint"
 
-echo "==> vault ${VAULT_VERSION} (CLI only; task mcp:token logs in from the runner)"
+echo "==> vault ${VAULT_VERSION} (CLI only; task status uses it)"
 curl -sSfLo /tmp/vault.zip \
   "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_${K3D_ARCH}.zip"
 unzip -oq /tmp/vault.zip vault -d /tmp
@@ -56,9 +56,12 @@ if [ "${1:-}" = "--e2e" ]; then
   curl -sSfLo /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-${K3D_ARCH}"
   ${SUDO} install /tmp/k3d "${BIN_DIR}/k3d"
   k3d version
-  echo "==> helm repo"
+  echo "==> apt: htpasswd"
+  ${SUDO} apt-get install -y -qq apache2-utils >/dev/null
+  echo "==> helm repos"
   helm repo add hashicorp https://helm.releases.hashicorp.com
-  helm repo update hashicorp
+  helm repo add dex https://charts.dexidp.io
+  helm repo update hashicorp dex
 fi
 
 echo "==> tools installed"

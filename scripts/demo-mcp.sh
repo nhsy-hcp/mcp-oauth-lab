@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 FAILURES=0
-token="$(scripts/mcp-token.sh)"
+token="$(scripts/oauth-login.sh testuser)"
 
 log "M1  Tools work with no secret in the pod"
 rows="$(mcp_tool "${token}" list_orders '{"status":"pending"}' | jq -r '.structuredContent.result[].customer' | paste -sd, -)"

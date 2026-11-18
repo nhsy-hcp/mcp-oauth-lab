@@ -1,6 +1,5 @@
-# Vault copies these alias-metadata-* annotations onto the entity alias at every login;
-# the mcp-server policy and the identity-token claims are templated on them. They never grant MCP tools:
-# tool access comes from Vault identity group membership.
+# Vault copies these alias-metadata-* annotations onto the entity alias at login, and the mcp-server policy is
+# templated on them. They never grant MCP tools, and client pods do not log in to Vault.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

@@ -67,9 +67,9 @@ spec:
             - {name: DB_CREDS_PATH, value: "database/creds/${ENVIRONMENT}-${APPLICATION}"}
             - {name: DB_HOST, value: "postgres.postgres-${ENVIRONMENT}.svc.cluster.local"}
             - {name: DB_NAME, value: "${ENVIRONMENT}"}
-            # Vault identity tokens: iss = <identity/oidc/config issuer>/v1/identity/oidc, aud = OIDC role client_id
-            - {name: MCP_ISSUER, value: "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc"}
-            - {name: MCP_AUDIENCE, value: mcp-orders}
+            # Tokens name the public issuer; this pod fetches the keys through the cluster alias (auth/coredns-custom.yaml)
+            - {name: MCP_ISSUER, value: "http://localhost:${AUTH_HOST_PORT}/api/auth"}
+            - {name: MCP_JWKS_URL, value: "http://auth.localhost:${AUTH_HOST_PORT}/api/auth/jwks"}
             - {name: MCP_RESOURCE_URL, value: "http://localhost:${MCP_HOST_PORT}/mcp"}
             # DNS-rebinding protection: only these Host headers are served
             - name: MCP_ALLOWED_HOSTS

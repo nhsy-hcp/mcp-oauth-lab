@@ -4,35 +4,26 @@
     "application_name": "orders-agent",
     "environment": "dev",
     "team": "ai-platform",
-    "group": "mcp-orders-reader",
     "pod": true,
-    "tools": "list_orders,get_order,whoami"
+    "tools": "list_orders,get_order,whoami",
+    "scopes": ["orders:list", "orders:get", "whoami"]
   },
   {
     "name": "mcp-client-reporting-agent",
     "application_name": "reporting-agent",
     "environment": "dev",
     "team": "finance",
-    "group": "mcp-orders-reporter",
     "pod": true,
-    "tools": "list_orders,get_order"
-  },
-  {
-    "name": "mcp-client-laptop",
-    "application_name": "laptop",
-    "environment": "dev",
-    "team": "ai-platform",
-    "group": "mcp-orders-reader",
-    "pod": false,
-    "tools": ""
+    "tools": "list_orders,get_order",
+    "scopes": ["orders:list"]
   },
   {
     "name": "mcp-client-unlisted",
     "application_name": "unlisted-agent",
     "environment": "dev",
     "team": "unknown",
-    "group": "",
     "pod": true,
-    "tools": "list_orders"
+    "tools": "list_orders",
+    "scopes": []
   }
 ]

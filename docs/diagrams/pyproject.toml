@@ -1,7 +1,7 @@
 [project]
 name = "mcp-lab-diagrams"
 version = "0.1.0"
-description = "Diagram sources for the MCP identity-broker lab docs (rendered to docs/images/*.png)"
+description = "Diagram sources for the MCP OAuth lab docs (rendered to docs/images/*.png)"
 requires-python = ">=3.11"
 dependencies = [
     "diagrams==0.25.1",

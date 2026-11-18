@@ -1,4 +1,4 @@
-"""Token flow as a Mermaid-style sequence diagram; the phases match section 5 of the solution design."""
+"""Pod token flow as a Mermaid-style sequence diagram; the phases match section 6 of the solution design."""
 
 from pathlib import Path
 
@@ -6,7 +6,6 @@ import diagrams
 from common import OUT_DIR
 from diagrams.k8s.compute import Pod
 from diagrams.k8s.controlplane import APIServer
-from diagrams.onprem.security import Vault
 from matplotlib.figure import Figure
 from matplotlib.image import imread
 from matplotlib.patches import FancyBboxPatch, Rectangle
@@ -18,70 +17,62 @@ PHASE_FILLS = ("#eef4fd", "#f6f8fb")
 LINE, TEXT = "#333333", "#1f2937"
 
 ACTORS = {
-    "app": "Client app",
-    "client_proxy": "Client\nVault Proxy",
+    "app": "Client pod",
     "k8s": "Kubernetes API",
-    "vault": "HashiCorp Vault",
-    "server_proxy": "Server\nVault Proxy",
+    "auth": "Better Auth",
     "mcp": "Orders MCP server",
 }
 
 # Official icons bundled with the diagrams library
 ICONS = {
     "app": Pod,
-    "client_proxy": Vault,
     "k8s": APIServer,
-    "vault": Vault,
-    "server_proxy": Vault,
+    "auth": Pod,
     "mcp": Pod,
 }
 
 PHASES = [
     (
-        "1. Proxy logs in to Vault",
+        "1. Pod logs in with its ServiceAccount",
         [
-            ("call", "client_proxy", "vault", "auth/kubernetes login with SA token"),
-            ("call", "vault", "k8s", "TokenReview"),
-            ("reply", "k8s", "vault", "ServiceAccount is valid"),
-            ("reply", "vault", "client_proxy", "Vault token, kept in Proxy memory"),
+            ("note", "app", "Read projected SA token\n(audience = issuer, 10 min)"),
+            (
+                "call",
+                "app",
+                "auth",
+                "POST /oauth2/token with SA token, scopes, resource",
+            ),
+            ("call", "auth", "k8s", "TokenReview"),
+            ("reply", "k8s", "auth", "valid, ServiceAccount name"),
+            ("note", "auth", "Map SA to OAuth client,\ncap scopes for that client"),
+            ("reply", "auth", "app", "access token: 5 min, aud = MCP resource"),
         ],
     ),
     (
-        "2. App requests a JWT",
+        "2. Pod calls the server",
         [
-            ("call", "app", "client_proxy", "read identity/oidc/token/mcp-orders"),
-            ("call", "client_proxy", "vault", "same read + Proxy's Vault token"),
-            ("reply", "vault", "client_proxy", "JWT: 5 min, aud=mcp-orders, groups"),
-            ("reply", "client_proxy", "app", "JWT"),
+            ("note", "app", "Cache token until\n60 s before expiry"),
+            ("call", "app", "mcp", "tools/call with Authorization: Bearer token"),
         ],
     ),
     (
-        "3. App calls the server",
+        "3. Server verifies the token",
         [
-            ("note", "app", "Cache JWT until\n60 s before expiry"),
-            ("call", "app", "mcp", "tools/call with Authorization: Bearer JWT"),
+            ("call", "mcp", "auth", "read JWKS (if not cached)"),
+            ("reply", "auth", "mcp", "public keys"),
+            ("note", "mcp", "Check ES256, typ, iss,\naud, exp, iat, sub, azp"),
         ],
     ),
     (
-        "4. Server verifies the JWT",
+        "4. Server enforces the scope",
         [
-            ("call", "mcp", "server_proxy", "read JWKS (if not cached)"),
-            ("call", "server_proxy", "vault", "identity/oidc/.well-known/keys"),
-            ("reply", "vault", "server_proxy", "public keys"),
-            ("reply", "server_proxy", "mcp", "public keys"),
-            ("note", "mcp", "Check RS256 signature,\niss, aud, exp, iat, sub"),
-        ],
-    ),
-    (
-        "5. Server authorises the tool",
-        [
-            ("note", "mcp", "Map groups to tools,\nthen require(tool)"),
+            ("note", "mcp", "Map scopes to tools,\nthen require(tool)"),
             ("reply", "mcp", "app", "tool result, tool error or 401"),
         ],
     ),
 ]
 
-MARGIN, GAP = 1.75, 3.05
+MARGIN, GAP = 1.75, 4.6
 ACTOR_W, ACTOR_H, TOP_ACTOR_H = 1.9, 0.72, 1.3
 ICON_H = 0.5
 NOTE_W = 2.65
@@ -209,7 +200,7 @@ def main() -> None:
             row += row_height
         y += size + 0.16
 
-    fig.savefig(OUT_DIR / "identity-broker.png", metadata={"Software": None})
+    fig.savefig(OUT_DIR / "token-flow.png", metadata={"Software": None})
 
 
 main()

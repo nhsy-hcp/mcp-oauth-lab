@@ -1,207 +1,188 @@
-# Solution Design: HashiCorp Vault as an Identity Broker for MCP Auth
+# Solution Design: OAuth for MCP with Better Auth, Dex and HashiCorp Vault
 
 ## 1. Summary
 
-An MCP server should know who is calling it and give each caller only the tools it needs. It should do this without
-anyone handing out API keys or client secrets. In this lab, HashiCorp Vault acts as the identity broker:
+An MCP server should know who is calling it and give each caller only the tools it needs. This lab uses standard
+OAuth 2.1 to do that, with each component doing one job:
 
-1. A client proves who it is with an identity it already has: a pod's Kubernetes ServiceAccount, or the laptop's
-   kubeconfig through a dedicated ServiceAccount.
-2. Vault swaps that for a **5-minute JWT**, scoped to one audience (`aud=mcp-orders`) and signed with Vault's own
-   key. The JWT's `groups` claim lists the caller's **Vault identity groups**.
-3. The MCP server checks the JWT against Vault's public keys (JWKS), then allows the tools those groups map to.
-4. The server reaches its own data with a **10-minute PostgreSQL user** that Vault creates for it. That user has
-   `SELECT` on one table and is dropped when the pod stops.
+| Component | Job |
+| --- | --- |
+| **Better Auth** | OAuth authorization server. Decides who gets which scope and issues every access token |
+| **Dex** | Human identity and groups, from static lab users |
+| **Kubernetes** | Workload identity. Pods prove who they are with a projected ServiceAccount token |
+| **Orders MCP server** | Resource server. Verifies access tokens and enforces the scope each tool needs |
+| **HashiCorp Vault** | Gives the MCP server dynamic PostgreSQL credentials through Vault Proxy |
 
-Client pods and the server's app container hold no long-lived secret; the lab's own setup credentials are listed under
-the [demo-only shortcuts](#8-threat-model). To revoke a client, remove it from a Vault group; its next token has no
-access, and any token it already holds expires within 5 minutes.
+Access tokens last 5 minutes and are bound to the MCP resource. A person's sign-in lasts at most 8 hours, however often
+their client refreshes. Client pods hold no client secret, and the server's
+app container holds no Vault token.
 
 ![Architecture](images/architecture.png)
 
-**Platform:** k3d (`vault-mcp-lab`), HashiCorp Vault 2.2.2 (single-node Raft), PostgreSQL 16 and MCP Python SDK 2.3. MCP
-is on `http://127.0.0.1:8000/mcp` (NodePort 30800) and Vault on `http://127.0.0.1:8200` (NodePort 30820), both
-bound to loopback only. Vault uses its default mount paths: `auth/kubernetes`, `database/` and the built-in
-`identity/oidc`.
+**Platform:** k3d (`vault-mcp-lab`), Better Auth 1.7.25, Dex 2.46.1, HashiCorp Vault 2.2.2 (single-node Raft),
+PostgreSQL 16 and MCP Python SDK 2.3. All laptop ports are bound to `127.0.0.1`.
+
+| Service | Laptop and pod URL |
+| --- | --- |
+| MCP server | `http://localhost:8000/mcp` on the laptop, `http://mcp-orders.mcp-server-dev.svc/mcp` in the cluster |
+| Better Auth | `http://localhost:3000` on the laptop, `http://auth.localhost:3000` in the cluster |
+| Dex | `http://dex.localhost:5556/dex` |
+| Vault | `http://127.0.0.1:8200` on the laptop |
 
 ## 2. Goals and non-goals
 
 **Goals**
 
-- No long-lived credential in client pods or the server's app container. Client JWTs last 5 minutes, Vault tokens
-  15/30 minutes, database users 10/30 minutes, and the ServiceAccount tokens used to log in 10 minutes.
-- Least privilege on both sides:
-  - A client may only mint one token type. It cannot read secrets or database credentials.
-  - The server may only read its own `database/creds` path. It cannot mint client tokens.
-- Vault decides who may call which tools: identity group membership, held centrally and auditable.
-- The laptop (Claude Code, MCP Inspector, `curl`) uses the same broker, with no static MCP or Vault token. It relies on
-  the operator's kubeconfig (section 7).
-- No Vault client library (`hvac`): the apps talk to Vault Proxy over a UNIX socket with the standard library.
+- Standard MCP OAuth for people, with per-user identity in tokens and logs.
+- No long-lived credential in client pods or the server's app container.
+- One place decides access: Better Auth. The MCP server only enforces what the token says.
+- Least privilege for clients through per-tool scopes, and for the server through one Vault database path.
+- No Vault client library (`hvac`): the server talks to Vault Proxy over a UNIX socket with the standard library.
 
 **Non-goals**
 
-- OAuth 2.1 authorization-code flow for humans (see section 9).
-- TLS and HA.
+- TLS and high availability.
+- A real identity provider behind Dex.
 - Free-form SQL tools.
 
-## 3. Identities
+## 3. One issuer, two routes
 
-| Identity | Namespace / ServiceAccount | Vault auth role | Vault policy | Vault group |
-| --- | --- | --- | --- | --- |
-| MCP server | `mcp-server-dev` / `…-sa` | `mcp-server` | `mcp-server` (templated) | none |
-| Orders agent | `mcp-client-orders-agent` / `…-sa` | `mcp-client` | `mcp-client` | `mcp-orders-reader` |
-| Reporting agent | `mcp-client-reporting-agent` / `…-sa` | `mcp-client` | `mcp-client` | `mcp-orders-reporter` |
-| Laptop (no pod) | `mcp-client-laptop` / `…-sa` | `mcp-client` | `mcp-client` | `mcp-orders-reader` |
-| Unlisted agent | `mcp-client-unlisted` / `…-sa` | `mcp-client` | `mcp-client` | none (fails closed) |
+Every token names one issuer: `http://localhost:3000/api/auth`. MCP clients accept plain HTTP for an OAuth server only
+on an exact loopback host, so the public URL must be `localhost`.
 
-- **Environments:** each environment is meant to have its own server namespace and PostgreSQL instance. The lab
-  deploys only `dev`: `mcp-server-dev` (named in `vault/servers.json`) and `postgres-dev`.
-- **Role bindings:** each auth role is bound by glob. `mcp-server` accepts only `mcp-server-*-sa` in
-  `mcp-server-*` namespaces; `mcp-client` accepts only `mcp-client-*-sa` in `mcp-client-*`. Both require token
-  audience `vault`.
-- **Aliases:** `alias_name_source` is the default, `serviceaccount_uid`. A deleted and recreated ServiceAccount is a
-  new alias and does not inherit the old one's group membership until `config:mcp-auth` runs again.
-- **Entities ahead of first login:** `scripts/config-mcp-auth.sh` creates each client's Vault entity and alias
-  (alias name = SA UID) so the client can join a group before it ever logs in.
+- On the laptop, `localhost:3000` reaches Better Auth through a k3d port mapping, and `dex.localhost:5556` reaches Dex.
+- In the cluster, `localhost` would mean the pod itself, so `auth/coredns-custom.yaml` rewrites `auth.localhost` and
+  `dex.localhost` to their Services. Pods use `auth.localhost` for the token endpoint and JWKS.
+- Each Service port equals its laptop port. Better Auth runs with a fixed base URL, so the issuer does not depend on
+  which route a request used.
 
-## 4. Vault configuration
+## 4. Identities
 
-**Policies:**
+| Identity | Authenticates with | OAuth client | Scopes |
+| --- | --- | --- | --- |
+| `testuser` | Dex password, group `mcp-orders-reader` | `claude-code`, `mcp-inspector` or `lab-cli` | `orders:list`, `orders:get`, `whoami` |
+| `reportuser` | Dex password, group `mcp-orders-reporter` | as above | `orders:list` |
+| `nogroupuser` | Dex password, no group | as above | none, so no token |
+| Orders agent pod | ServiceAccount `mcp-client-orders-agent-sa` | `orders-agent` | `orders:list`, `orders:get`, `whoami` |
+| Reporting agent pod | ServiceAccount `mcp-client-reporting-agent-sa` | `reporting-agent` | `orders:list` |
+| Unlisted pod | ServiceAccount `mcp-client-unlisted-sa` | none | none, so no token |
+| MCP server | ServiceAccount `mcp-server-dev-sa`, to Vault only | none | not applicable |
+
+OAuth clients are pre-registered by a seed Job from `auth/public-clients.json` and `auth/mcp-clients.json`. The Job
+corrects changed clients and removes clients no longer listed. Dynamic client registration is off, and only the seed
+identity can manage clients.
+
+## 5. Authorisation
+
+Better Auth makes the decision, using `auth/group_scopes.json`:
+
+| Dex group | Scopes it may hold |
+| --- | --- |
+| `mcp-orders-reader` | `orders:list`, `orders:get`, `whoami` |
+| `mcp-orders-reporter` | `orders:list` |
+
+1. **At consent**, a server-side hook narrows the requested scopes to those the user's groups allow. A client can
+   request every scope, and the user still receives only their own.
+2. **At every user token issue and refresh**, Better Auth targets the MCP resource and refuses scopes beyond that set.
+   This also covers a tampered consent record.
+3. **At each Dex sign-in**, the user's stored consents are cleared, so the next authorization is narrowed again.
+   Token issue and refresh stop 8 hours after that sign-in (`sign_in_ttl_seconds`), so new groups always take effect.
+4. **At the MCP server**, `app/src/mcp_lab/scope_tools.toml` maps scopes to tools, and each tool calls `require()`.
+
+| Scope | Tool |
+| --- | --- |
+| `orders:list` | `list_orders` |
+| `orders:get` | `get_order` |
+| `whoami` | `whoami` |
+| none | `delete_order`: listed, but no scope grants it, so every caller gets "permission denied" |
+
+Groups and `preferred_username` come from the Dex ID token verified and stored at the last sign-in. Users cannot edit
+them because Better Auth's profile and account-linking endpoints are disabled. A tool outside the token's scopes
+returns an MCP tool error.
+
+## 6. Token flows
+
+### Client pods
+
+![Pod token flow](images/token-flow.png)
+
+1. The pod reads its projected ServiceAccount token, with the Better Auth issuer as audience and a 10-minute lifetime.
+2. `ClientCredentialsAuth` sends it to `/oauth2/token` using `client_credentials`, a custom client assertion type, the
+   pod's scopes and the MCP resource.
+3. The `kubernetes_service_account` method in `auth/src/serviceAccount.ts` calls Kubernetes TokenReview. It refuses the
+   request unless the token is valid, has this audience, and its exact ServiceAccount maps to a seeded client.
+4. Better Auth caps the scopes at that client's `client_credentials_scopes` and issues the token.
+
+### People
+
+![Human login](images/human-login.png)
+
+1. The client calls the MCP server, gets `401`, and reads the protected resource metadata that names Better Auth.
+2. It runs the authorization code flow with PKCE using its pre-registered client ID.
+3. Better Auth sends the browser to Dex. Dex checks the password and returns an ID token with the user's groups.
+4. The user approves consent, the scopes are narrowed, and the client receives its tokens.
+
+### Token verification
+
+`OAuthJwtVerifier` (`app/src/mcp_lab/auth.py`) requires ES256, `typ=at+jwt`, the Better Auth issuer, the MCP resource in
+`aud`, and `exp`, `iat`, `sub`, `azp` and `scope`. JWKS is cached, and an unknown `kid` triggers at most one refetch
+every 10 seconds. A token with no known scope gets `401`.
+
+## 7. Server-side credentials
+
+![Dynamic database credentials](images/dynamic-db.png)
+
+A Vault Proxy native sidecar runs with role `mcp-server`. `CredentialManager` reads `database/creds/dev-orders` over the
+socket, opens a small connection pool, and refreshes at two thirds of the lease (capped at 60 seconds). It swaps the
+pool when the username changes, recovers from revocation with `cache-clear`, and on SIGTERM closes the pool and calls
+`revoke-self`.
+
+The database user inherits `dev_orders_ro`: `USAGE` on schema `orders` and `SELECT` on `orders.items`. Schema `payments`
+in the same database holds a canary that no MCP identity can read. Better Auth has its own `auth` database and owner.
 
 ```hcl
 # mcp-server (accessor substituted at config time)
 path "database/creds/{{identity.entity.aliases.<accessor>.metadata.environment}}-{{identity.entity.aliases.<accessor>.metadata.application_name}}" {
   capabilities = ["read"]
 }
-
-# mcp-client
-path "identity/oidc/token/mcp-orders" {
-  capabilities = ["read"]
-}
 ```
-
-The server reads JWKS from `identity/oidc/.well-known/keys`. That endpoint needs no authentication, so no grant is
-required. `deny_slash_in_templated_paths = true` is set in the server config, so a `/` in an annotation value
-cannot widen the templated path (CVE-2026-5006).
-
-**Identity tokens** (`scripts/config-mcp-auth.sh`):
-
-| Setting | Value | Why |
-| --- | --- | --- |
-| `identity/oidc/config issuer` | `http://vault.vault.svc.cluster.local:8200` | A fixed `iss` (`…/v1/identity/oidc`), whichever address minted the token |
-| `identity/oidc/key/mcp` | RS256, `rotation_period=24h`, `verification_ttl=24h`, `allowed_client_ids=mcp-orders` | Asymmetric key; old public keys stay published until tokens signed with them expire |
-| `identity/oidc/role/mcp-orders` | `key=mcp`, `client_id=mcp-orders`, `ttl=5m` | `aud` = `mcp-orders`; short lifetime |
-| Claims template | `groups` ← `{{identity.entity.groups.names}}`; `environment`, `application_name`, `team` ← SA annotations | Groups authorise; annotations are informational only |
-
-A token looks like this:
-
-```json
-{"iss": "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc", "aud": "mcp-orders", "sub": "<entity id>",
- "exp": 1794924600, "iat": 1794924300, "groups": ["mcp-orders-reader"], "environment": "dev",
- "application_name": "orders-agent", "team": "ai-platform", "namespace": "root"}
-```
-
-## 5. Token flow
-
-![Identity broker flow](images/identity-broker.png)
-
-1. The client's Vault Proxy sidecar logs in to `auth/kubernetes` with the pod's projected ServiceAccount token
-   (`aud=vault`, 10 minutes, mounted only in the Proxy container). The resulting Vault token never leaves Proxy's
-   memory.
-2. The client app reads `identity/oidc/token/mcp-orders` over the UNIX socket. Proxy adds its own token
-   (`use_auto_auth_token = "force"`). Identity tokens have no lease, so Proxy doesn't cache them; each read mints a
-   new one.
-3. `VaultIdentityAuth` (`app/src/mcp_lab/client.py`) caches the JWT until 60 seconds before expiry and sends it as
-   `Authorization: Bearer`.
-4. `VaultJwtVerifier` (`app/src/mcp_lab/auth.py`) checks the token:
-   - Allows `RS256` only.
-   - Looks up the `kid` in the JWKS, read through the server's own Proxy and cached. An unknown `kid` triggers at
-     most one refetch every 10 seconds, so forged kids can't flood Vault.
-   - Requires `iss`, `aud`, `exp`, `iat` and `sub`.
-   - Maps `groups` through `app/src/mcp_lab/group_tools.toml`, which ships inside the image, so changing it needs a
-     reviewed commit and a rebuild. No known group gives `401`. The server refuses to start if the file is malformed,
-     names a tool it does not register, or grants `delete_order`.
-5. Every tool calls `require(<tool>)` first. A tool outside the caller's groups returns an MCP tool error. The
-   client's token is never forwarded anywhere.
-
-| Group | Tools |
-| --- | --- |
-| `mcp-orders-reader` | `list_orders`, `get_order`, `whoami` |
-| `mcp-orders-reporter` | `list_orders` |
-| (none) | `delete_order`: listed, but no group grants it, so every caller gets "permission denied" |
-
-The control is split on purpose. Who is in a group is runtime state in Vault, changed by platform admins and
-audited. What a group may call is code, changed by pull request and tested.
-
-## 6. Server-side credentials
-
-![Dynamic database credentials](images/dynamic-db.png)
-
-The server keeps the pattern from `learn-vault-proxy`. A Vault Proxy native sidecar runs with `role mcp-server`.
-`CredentialManager` reads `database/creds/dev-orders` over the socket, opens a small connection pool, and
-refreshes at two thirds of the lease (capped at 60 seconds). It swaps the pool when the username changes, recovers
-from revocation with `cache-clear`, and on SIGTERM closes the pool and calls `revoke-self`.
-
-The database user inherits `dev_orders_ro`: `USAGE` on schema `orders` and `SELECT` on `orders.items`. Nothing
-else is granted. Schema `payments` in the same database holds a canary that no MCP identity can read.
-
-## 7. Laptop access
-
-![Laptop token](images/laptop-token.png)
-
-`task mcp:token` (`scripts/mcp-token.sh`) works like this:
-
-1. `kubectl create token mcp-client-laptop-sa --audience vault --duration 10m`.
-2. Log in to `auth/kubernetes` on `localhost:8200`, with the JWT on stdin.
-3. Read `identity/oidc/token/mcp-orders`.
-4. `vault token revoke -self`, then print only the JWT.
-
-The root token in `.env` is explicitly unset, and nothing is written to disk. `.mcp.json` sets
-`scripts/mcp-headers.sh` as Claude Code's `headersHelper`, so Claude Code fetches fresh headers instead of storing
-one.
-
-The trust anchor for the laptop is the operator's kubeconfig: whoever can create tokens for `mcp-client-laptop-sa`
-can act as the laptop client.
 
 ## 8. Threat model
 
 | Threat | Control | Residual risk |
 | --- | --- | --- |
-| Stolen client JWT | 5-minute TTL; `aud=mcp-orders`, so no other server accepts it | Replayable until `exp`; there is no TLS in the lab |
-| Forged or altered JWT | RS256 signature against Vault's JWKS; `alg` pinned; `iss`, `aud`, `exp` and `iat` required | None known |
-| Client widens its own access by editing SA annotations | Tools come from Vault groups, not annotations; app teams have read-only RBAC on ServiceAccounts | Annotations still drive the server's DB path template; protected by RBAC and `deny_slash_in_templated_paths` |
-| Compromised client pod reads data directly | `mcp-client` policy allows one `identity/oidc/token` path; `database/creds` gives `403` (A4) | It can call the tools its group allows until removed |
-| Compromised server mints client tokens | `mcp-server` policy has no `identity/oidc/token` grant (A3) | It has its own data access: `SELECT` on one table |
-| Prompt injection or SQL injection through tool arguments | Fixed, parameterised SQL; `limit` clamped to 50; DB grant is `SELECT` on one table | Data in `orders.items` is readable by allowed callers |
-| Vault token theft | No sink: Vault tokens exist only in Proxy memory; laptop tokens are revoked straight after use | Memory dump of a Proxy process |
-| DNS rebinding against `localhost:8000` | MCP SDK `TransportSecuritySettings.allowed_hosts`; NodePort bound to `127.0.0.1` | None for the demo |
-| Signing key rotation breaks clients | JWKS refetched on unknown `kid`; `verification_ttl=24h` keeps old keys published | None |
+| Stolen access token | 5-minute TTL; bound to the MCP resource | Replayable until `exp`; no TLS in the lab |
+| Forged or altered token | ES256 signature against Better Auth's JWKS; `alg` and `typ` pinned; claims required | None known |
+| User obtains extra scopes | Narrowed at consent and refused at every user token issue and refresh | Group changes apply at the next sign-in, within 8 hours; existing access tokens last until they expire |
+| User edits identity or groups | Taken from the Dex ID token; profile and account-linking endpoints disabled | None known |
+| Session or ID token used as an access token | Session JWT endpoint disabled; server requires `typ=at+jwt` and the MCP audience | None known |
+| Stolen pod ServiceAccount token | Audience-bound, expires within 10 minutes, checked by TokenReview | Replayable until it expires, because a projected token is reused and has no single-use check |
+| Wrong pod claims a client | Exact ServiceAccount to client mapping | Anyone who can run a pod as that ServiceAccount acts as that client |
+| Compromised client pod reads data directly | The pod has no Vault Proxy and no Vault role | It can call the tools its scopes allow until disabled |
+| Rogue OAuth client registers itself | Dynamic registration off; client management limited to the seeder | None known |
+| Compromised server | One Vault path; `SELECT` on one table; it cannot authenticate as an OAuth client | It has its own data access |
+| Prompt or SQL injection through tool arguments | Fixed, parameterised SQL; `limit` clamped to 50 | Data in `orders.items` is readable by allowed callers |
+| DNS rebinding against `localhost:8000` | `allowed_hosts`; NodePorts bound to `127.0.0.1` | None for the demo |
 
 **Demo-only shortcuts:**
 
+- Every static user shares a public password, `password` by default.
+- Better Auth's browser cookies are on `localhost`, which is shared by every local port.
 - Plain HTTP everywhere.
-- Root token used for configuration.
-- Unseal keys in `vault-init.json`.
-- Single Vault node.
-- `sslmode=disable`.
-- Static PostgreSQL superuser password in a Kubernetes Secret.
+- Root token used for Vault configuration, and unseal keys in `vault-init.json`.
+- Single Vault node and `sslmode=disable`.
+- Generated secrets are stored in plain Kubernetes Secrets.
 - Non-expiring token-reviewer ServiceAccount token stored in Vault.
-- Laptop access rests on the operator's long-lived kubeconfig.
 
 ## 9. Limits and next steps
 
-- **Standard MCP OAuth for humans.** Claude Code and the Inspector speak OAuth 2.1 with discovery. Here they use a
-  pre-minted bearer token instead. The SDK already serves protected resource metadata that names Vault as the
-  issuer. A full flow needs an authorization server: Vault's OIDC provider, IBM Verify or another IdP. In that flow
-  the MCP server would still verify tokens and never forward them to Vault.
-- **Per-user identity.** The Vault entity in the audit log is the workload, not the human behind it.
-- **Vault Enterprise features** such as:
-  - namespaces per team;
-  - Sentinel (for example, no production tokens out of hours);
-  - control groups (a human approves a sensitive tool);
-  - agent identity with on-behalf-of tokens, so the user and the agent both appear in the audit log.
+- **Real identity provider.** Replace Dex's static users with a connector. Better Auth does not change.
+- **Sender-constrained tokens.** DPoP would stop a stolen access token being replayed.
+- **`insufficient_scope` responses.** Scope is checked inside each tool, so a missing scope is an MCP tool error
+  rather than an HTTP `403` that triggers step-up consent.
+- **High availability and TLS** for Better Auth, Dex, Vault and PostgreSQL.
 
 ## 10. Acceptance tests
 
-`task test:all` runs the unit tests, then `demo:mcp` (M1–M8) and `demo:mcp-auth` (A1–A12) against the live lab.
-See `docs/walkthrough.md` for what each scenario shows.
+`task test:all` runs the unit tests, then `demo:mcp` (M1-M8), `demo:mcp-auth` (A1-A12) and `demo:human-auth` (H1-H13)
+against the live lab. See `docs/walkthrough.md` for what each scenario shows.

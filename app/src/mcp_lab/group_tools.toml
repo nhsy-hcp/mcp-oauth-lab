@@ -1,9 +1,0 @@
-# Vault identity group -> MCP tools it may call.
-#
-# Who is in a group is decided in Vault (identity/group). What a group may call is decided here, in
-# this file, which ships inside the mcp_lab package: a change needs a reviewed commit and an image rebuild.
-# The server refuses to start if this file is malformed, names a tool it does not register, or grants delete_order.
-
-[groups]
-mcp-orders-reader = ["list_orders", "get_order", "whoami"]
-mcp-orders-reporter = ["list_orders"]

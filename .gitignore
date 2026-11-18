@@ -32,3 +32,6 @@ Thumbs.db
 
 # Agent tooling
 .claude/
+
+# Better Auth service
+node_modules/

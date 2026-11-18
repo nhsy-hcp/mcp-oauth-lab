@@ -1,5 +1,5 @@
 """Test fixtures: a fake Vault Proxy on a UNIX socket, fake connection pools (from learn-vault-proxy), and a fake
-Vault OIDC issuer (RSA keys, JWKS, signed identity tokens) with a fake DB runner for the MCP layer."""
+OAuth authorization server (ES256 key, JWKS, signed access tokens) with a fake DB runner for the MCP layer."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ from typing import Any
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
-from jwt.algorithms import RSAAlgorithm
+from cryptography.hazmat.primitives.asymmetric import ec
+from jwt.algorithms import ECAlgorithm
 
 from mcp_lab.vault_client import VaultClient
 
 Route = tuple[int, dict[str, str], Any]
-ISSUER = "http://vault.vault.svc.cluster.local:8200/v1/identity/oidc"
-AUDIENCE = "mcp-orders"
+OAUTH_ISSUER = "http://localhost:3000/api/auth"
+RESOURCE = "http://localhost:8000/mcp"
 
 
 @dataclass
@@ -232,58 +232,43 @@ class Connector:
 # --- MCP layer fakes ------------------------------------------------------------------------
 
 
-def _key() -> rsa.RSAPrivateKey:
-    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-
 @dataclass
-class FakeVault:
-    """Stands in for VaultClient.read: serves JWKS and identity tokens like Vault's identity/oidc."""
+class FakeAuthServer:
+    """Stands in for Better Auth: an ES256 JWKS and RFC 9068 access tokens."""
 
-    keys: dict[str, rsa.RSAPrivateKey] = field(default_factory=lambda: {"kid-1": _key()})
-    active_kid: str = "kid-1"
-    groups: list[str] = field(default_factory=lambda: ["mcp-orders-reader"])
-    ttl: int = 300
-    token_status: int = 200
-    jwks_status: int = 200
-    reads: list[str] = field(default_factory=list)
+    key: ec.EllipticCurvePrivateKey = field(default_factory=lambda: ec.generate_private_key(ec.SECP256R1()))
+    kid: str = "es-1"
+    fetches: int = 0
+    fail: bool = False
 
     def jwks(self) -> dict[str, Any]:
-        out = []
-        for kid, key in self.keys.items():
-            jwk = RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
-            jwk.update({"kid": kid, "alg": "RS256", "use": "sig"})
-            out.append(jwk)
-        return {"keys": out}
+        self.fetches += 1
+        if self.fail:
+            raise OSError("auth server down")
+        jwk = ECAlgorithm.to_jwk(self.key.public_key(), as_dict=True)
+        jwk.update({"kid": self.kid, "alg": "ES256", "use": "sig"})
+        return {"keys": [jwk]}
 
     def mint(self, **overrides: Any) -> str:
         now = int(time.time())
         claims: dict[str, Any] = {
-            "iss": ISSUER,
-            "aud": AUDIENCE,
-            "sub": "entity-1234",
+            "iss": OAUTH_ISSUER,
+            "aud": [RESOURCE, f"{OAUTH_ISSUER}/oauth2/userinfo"],
+            "sub": "user-1",
+            "azp": "lab-cli",
+            "client_id": "lab-cli",
+            "scope": "openid orders:list orders:get whoami",
+            "preferred_username": "testuser",
             "iat": now,
-            "exp": now + self.ttl,
-            "namespace": "root",
-            "groups": self.groups,
-            "environment": "dev",
-            "application_name": "orders-agent",
+            "exp": now + 300,
         }
-        kid = overrides.pop("kid", self.active_kid)
-        key = overrides.pop("key", self.keys.get(kid) or _key())
+        key = overrides.pop("key", self.key)
+        alg = overrides.pop("alg", "ES256")
+        typ = overrides.pop("typ", "at+jwt")
+        kid = overrides.pop("kid", self.kid)
         claims.update(overrides)
         claims = {k: v for k, v in claims.items() if v is not None}
-        return jwt.encode(claims, key, algorithm=overrides.pop("alg", "RS256"), headers={"kid": kid})
-
-    def read(self, path: str) -> tuple[int, dict[str, str], Any]:
-        self.reads.append(path)
-        if path == "identity/oidc/.well-known/keys":
-            return self.jwks_status, {}, self.jwks() if self.jwks_status == 200 else {"errors": ["sealed"]}
-        if path.startswith("identity/oidc/token/"):
-            if self.token_status != 200:
-                return self.token_status, {}, {"errors": ["permission denied"]}
-            return 200, {}, {"data": {"token": self.mint(), "client_id": AUDIENCE, "ttl": self.ttl}}
-        return 404, {}, None
+        return jwt.encode(claims, key, algorithm=alg, headers={"kid": kid, "typ": typ})
 
 
 class FakeCreds:
@@ -335,8 +320,8 @@ class _FakeConn:
 
 
 @pytest.fixture
-def vault() -> FakeVault:
-    return FakeVault()
+def auth_server() -> FakeAuthServer:
+    return FakeAuthServer()
 
 
 @pytest.fixture

@@ -1,0 +1,5 @@
+[
+  { "id": "lab-cli", "redirectUris": ["http://127.0.0.1:8976/callback"] },
+  { "id": "claude-code", "redirectUris": ["http://localhost:33418/callback"] },
+  { "id": "mcp-inspector", "redirectUris": ["http://localhost:6274/oauth/callback"] }
+]

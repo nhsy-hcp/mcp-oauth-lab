@@ -13,10 +13,10 @@ case "${1:-}" in
   *) echo "Usage: $0 [--lint]" >&2; exit 2 ;;
 esac
 
-REQUIRED=(kubectl helm k3d jq task uv envsubst openssl vault)
+REQUIRED=(kubectl helm k3d jq task uv envsubst openssl vault node npm htpasswd)
 LINT=(pre-commit shellcheck gitleaks yamllint hadolint ruff)
 if [ "${lint_required}" = true ]; then
-  REQUIRED=(task uv) # task runs the hooks, uv runs the unit tests in test:ci
+  REQUIRED=(task uv node npm) # task runs the hooks, uv and npm run the unit tests in test:ci
 fi
 # Optional extras: dot renders docs/diagrams (task docs:diagrams), npx runs the MCP Inspector,
 # act runs the GitHub CI lint job locally (task ci:act, part of test:ci)

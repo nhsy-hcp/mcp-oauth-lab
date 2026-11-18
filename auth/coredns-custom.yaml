@@ -1,0 +1,11 @@
+# Lets pods reach Better Auth and Dex by name, like Compose network aliases. On the laptop, dex.localhost resolves to
+# loopback and uses a k3d port mapping. Better Auth's public URL is http://localhost:<port>, which MCP clients accept.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  lab.override: |
+    rewrite name exact auth.localhost better-auth.better-auth.svc.cluster.local
+    rewrite name exact dex.localhost dex.dex.svc.cluster.local

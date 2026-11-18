@@ -1,4 +1,4 @@
--- PostgreSQL bootstrap for the MCP identity-broker lab. Runs once, on an empty data directory, via
+-- PostgreSQL bootstrap for the MCP OAuth lab. Runs once, on an empty data directory, via
 -- 00-bootstrap.sh, which supplies the vault_admin_dev bootstrap password from a Kubernetes Secret.
 -- Vault rotates that password with database/rotate-root straight after configuration.
 \set ON_ERROR_STOP on

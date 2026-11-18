@@ -1,1 +1,1 @@
-"""Orders MCP server and client for the HashiCorp Vault identity-broker lab."""
+"""Orders MCP server and client for the MCP OAuth lab."""

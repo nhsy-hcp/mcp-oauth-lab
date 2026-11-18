@@ -4,11 +4,11 @@ Rules and orientation for AI agents working in this repository.
 
 ## Purpose
 
-A local lab showing HashiCorp Vault as an **identity broker for MCP auth** on k3d. Client pods (and the
-operator's laptop) log in to Vault with Kubernetes auth and receive a short-lived, audience-bound Vault identity
-JWT. The MCP server verifies the JWT against Vault's JWKS and authorises tools by Vault identity group. The server
-itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar on a UNIX socket. The design is
-`docs/solution-design.md`.
+A local lab showing standard OAuth for an MCP server on k3d. People sign in through **Better Auth** and **Dex** static
+users, and client pods log in to Better Auth with their Kubernetes ServiceAccount JWT. Better Auth decides scopes and
+issues short-lived, audience-bound JWTs. The MCP server verifies them by JWKS and authorises tools by scope. It gets
+dynamic PostgreSQL credentials from **HashiCorp Vault** through a Vault Proxy native sidecar on a UNIX socket. The
+design is `docs/solution-design.md`.
 
 ## Rules
 
@@ -19,13 +19,15 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
   `#!/bin/bash` and `set -euo pipefail` and pass shellcheck. Scripts must run on macOS `/bin/bash` 3.2: no
   associative arrays and no `mapfile`.
 - Never hardcode secrets. `vault-init.json` and `.env` are git-ignored. Add new environment variables to
-  `.env.template`.
+  `.env.template`. The only exception is the documented public lab password for static Dex users.
 - Stage files by explicit path only, and never use `--no-verify`. Run `task lint` before every commit.
 - Commit messages follow Conventional Commits (`type: description`, lowercase).
-- Use Vault's default mount paths: `auth/kubernetes`, `database/`, and the built-in
-  `identity/oidc`.
-- Python 3.12 managed with uv (`app/pyproject.toml`); ruff with a 200-character line length. The app talks to Vault
-  only through Vault Proxy over the UNIX socket, with the standard library (no `hvac`).
+- Use Vault's default mount paths: `auth/kubernetes` and `database/`.
+- Python 3.12 managed with uv (`app/pyproject.toml`); ruff with a 200-character line length. The MCP server talks to
+  Vault only through Vault Proxy over the UNIX socket, with the standard library (no `hvac`). Client pods do not use
+  Vault.
+- The auth service is TypeScript on Node 22 (`auth/`), with exact package pins, Biome, `tsc` and Vitest. Better Auth is
+  the only place that decides which scopes a user or client may hold.
 - Vault configuration runs as `kubectl exec vault-0 -n vault -- vault ...` through `vault_cmd` / `vault_cmd_in` in
   `scripts/lib.sh`, with the root token read from `vault-init.json` and sent on stdin, never as an argument. Every
   config step must be safe to re-run.
@@ -38,24 +40,26 @@ itself gets dynamic PostgreSQL credentials through a Vault Proxy native sidecar 
 | --- | --- |
 | `Taskfile.yml` | All tasks; version pins and TTL variables at the top |
 | `scripts/` | Bash helpers invoked from the Taskfile |
-| `vault/` | Vault Helm values, RBAC, policies, roles, identity config, PostgreSQL manifests and SQL |
+| `vault/` | Vault Helm values, RBAC, policies, roles, PostgreSQL manifests and SQL |
+| `auth/` | Better Auth service, Dex values, CoreDNS aliases, group-to-scope map and OAuth client lists |
 | `templates/` | Per-workload manifest templates rendered with `envsubst` |
-| `app/` | `mcp_lab` Python package (server and client), tests and Dockerfile |
+| `app/` | `mcp_lab` Python package (MCP server and client), tests and Dockerfile |
 | `docs/` | Design, walkthrough, troubleshooting, diagram sources and PNGs |
 
 ## Common tasks
 
 | Task | Does |
 | --- | --- |
-| `task init` | Installs pre-commit hooks, adds the Helm repo, creates `.env`, syncs the app venv |
+| `task init` | Installs pre-commit hooks, adds the Helm repos, creates `.env`, syncs the Python and Node packages |
 | `task deps` | Checks the CLI tools the lab needs |
 | `task all` (`up`) | Builds the whole lab |
 | `task down` | Stops the cluster, keeping its data; afterwards run `task cluster:up` and `task unseal:vault` |
 | `task lint` | Runs every pre-commit hook plus a full-history gitleaks scan |
-| `task test` | Runs the unit tests and the script tests (no cluster) |
-| `task test:all` | Unit tests plus `demo:mcp` (M1-M8) and `demo:mcp-auth` (A1-A12) on the running lab |
-| `task mcp:token` | Prints a 5-minute Vault identity JWT for the laptop client |
-| `task mcp:inspector` | Opens the MCP Inspector web UI with the `Authorization` header pre-set; `mcp:inspector:refresh` renews the JWT |
+| `task test` | Runs the Python and Better Auth unit tests and the script tests (no cluster) |
+| `task test:all` | Unit tests plus `demo:mcp` (M1-M8), `demo:mcp-auth` (A1-A12) and `demo:human-auth` (H1-H13) on the running lab |
+| `task auth:deploy` | Builds Better Auth, migrates its database, seeds OAuth clients and deploys it |
+| `task mcp:login` | Prints an access token for a lab user without a browser (`LAB_USER=testuser`) |
+| `task mcp:inspector` | Opens the MCP Inspector web UI, with OAuth sign-in |
 | `task ui` | Copies the Vault root token to the clipboard (`task token`) and opens the Vault UI |
 | `task docs:diagrams` | Renders `docs/diagrams/*.py` to `docs/images/*.png` (needs Graphviz) |
 | `task test:ci` | Lint, unit tests and `ci:act`; with `E2E=true`, also builds the lab and runs `test:all` |
@@ -68,5 +72,5 @@ For the full list, run `task --list`.
 
 1. Run `task deps` first and stop if anything is missing.
 2. Run tasks in order. If a step fails, stop and report rather than improvising changes.
-3. Use `localhost:8200` for Vault and `localhost:8000/mcp` for the MCP server from the laptop, and
-   `kubectl exec vault-0` inside the cluster.
+3. From the laptop, use `localhost:8200` for Vault, `localhost:8000/mcp` for the MCP server,
+   `localhost:3000` for Better Auth and `dex.localhost:5556` for Dex. Use `kubectl exec vault-0` inside the cluster.

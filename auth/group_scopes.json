@@ -1,0 +1,4 @@
+{
+  "mcp-orders-reader": ["orders:list", "orders:get", "whoami"],
+  "mcp-orders-reporter": ["orders:list"]
+}

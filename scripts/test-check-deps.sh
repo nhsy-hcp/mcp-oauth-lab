@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 stubs="$(mktemp -d)"
 trap 'rm -rf "${stubs}"' EXIT
-for bin in task uv pre-commit shellcheck gitleaks yamllint hadolint ruff; do
+for bin in task uv node npm pre-commit shellcheck gitleaks yamllint hadolint ruff; do
   printf '#!/bin/sh\nexit 0\n' >"${stubs}/${bin}"
   chmod +x "${stubs}/${bin}"
 done

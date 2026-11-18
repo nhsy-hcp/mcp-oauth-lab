@@ -1,6 +1,6 @@
 """Orders MCP server (Streamable HTTP on :8080/mcp).
 
-* Every request needs a Vault identity JWT (``Authorization: Bearer``); see :mod:`mcp_lab.auth`.
+* Every request needs an OAuth access token (``Authorization: Bearer``); see :mod:`mcp_lab.auth`.
 * Tools run fixed SQL with a PostgreSQL user Vault minted for this pod (Proxy socket, ``CredentialManager``).
 * On SIGTERM uvicorn stops serving, then the pool closes and the Proxy token is revoked, which drops
   the database user straight away.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import anyio
@@ -22,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mcp_lab import tools
-from mcp_lab.auth import GroupToolsError, VaultJwtVerifier, check_group_tools, packaged_group_tools, require
+from mcp_lab.auth import OAuthJwtVerifier, ScopeToolsError, check_scope_tools, fetch_jwks_url, packaged_scope_tools, require
 from mcp_lab.config import ConfigError, ServerConfig
 from mcp_lab.creds import CredentialManager
 from mcp_lab.logging_setup import configure_logging, log_event
@@ -30,10 +31,10 @@ from mcp_lab.vault_client import VaultClient
 
 log = logging.getLogger(__name__)
 
-INSTRUCTIONS = "Read-only access to dev orders. Every call is authorised by the caller's Vault identity group."
+INSTRUCTIONS = "Read-only access to dev orders. Every call is authorised by the caller's OAuth scopes."
 
 
-def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwtVerifier) -> MCPServer:
+def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: OAuthJwtVerifier) -> MCPServer:
     mcp = MCPServer(
         "orders",
         instructions=INSTRUCTIONS,
@@ -41,14 +42,13 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
         auth=AuthSettings(
             issuer_url=config.issuer,
             resource_server_url=config.resource_url,
-            # The verifier checks aud itself (Vault sets aud = the OIDC role's client_id, not a URL).
-            validate_token_resource=False,
+            validate_token_resource=True,
         ),
     )
     registered: set[str] = set()
 
     def tool(**kwargs: Any) -> Callable[[Callable[..., Any]], Any]:
-        """``mcp.tool`` that also records the name, so the group map can be checked against what is served."""
+        """``mcp.tool`` that also records the name, so the scope map can be checked against what is served."""
 
         def register(fn: Callable[..., Any]) -> Any:
             registered.add(kwargs.get("name") or fn.__name__)
@@ -71,18 +71,24 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
     # Listed so clients see it is refused; annotated destructive so a model client treats it with care
     @tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True), structured_output=False)
     def delete_order(order_id: int) -> None:
-        """Delete one dev order. Always denied: no Vault group is granted it, and orders are read-only."""
-        require("delete_order")  # no group in group_tools.toml grants delete_order, so this raises for every caller
-        # Defence in depth if a group is ever granted it: there is no DELETE path, and the DB grant is SELECT only.
+        """Delete one dev order. Always denied: no scope grants it, and orders are read-only."""
+        require("delete_order")  # no scope in scope_tools.toml grants delete_order, so this raises for every caller
+        # Defence in depth if a scope ever grants it: there is no DELETE path, and the DB grant is SELECT only.
         raise ToolError(f"permission denied: delete_order is not supported (order {int(order_id)} untouched; orders are read-only)")
 
     @tool()
     def whoami() -> dict[str, Any]:
-        """The calling client's Vault identity and the database user this server is using (never a password)."""
+        """The calling identity and the database user this server is using (never a password)."""
         token = require("whoami")
         claims = token.claims or {}
         return {
-            "caller": {"client": token.client_id, "entity_id": token.subject, "groups": claims.get("groups"), "token_expires_at": token.expires_at},
+            "caller": {
+                "client": token.client_id,
+                "subject": token.subject,
+                "user": claims.get("preferred_username"),
+                "scopes": token.scopes,
+                "token_expires_at": token.expires_at,
+            },
             "database": tools.whoami(creds),
         }
 
@@ -91,7 +97,7 @@ def build_mcp(config: ServerConfig, creds: tools.QueryRunner, verifier: VaultJwt
         ok = creds.is_healthy()  # type: ignore[attr-defined]
         return JSONResponse({"ok": ok}, status_code=200 if ok else 503)
 
-    check_group_tools(verifier.group_tools, registered)
+    check_scope_tools(verifier.scope_tools, registered)
     return mcp
 
 
@@ -119,14 +125,14 @@ async def serve(config: ServerConfig) -> None:
         max_refresh_seconds=config.creds_refresh_max_seconds,
     )
     try:
-        verifier = VaultJwtVerifier(vault.read, issuer=config.issuer, audience=config.audience, group_tools=packaged_group_tools())
+        verifier = OAuthJwtVerifier(partial(fetch_jwks_url, config.jwks_url), issuer=config.issuer, audience=config.resource_url, scope_tools=packaged_scope_tools())
         mcp = build_mcp(config, creds, verifier)
-    except GroupToolsError as exc:
-        log_event(log, logging.ERROR, "group_tools_invalid", error=str(exc))
+    except ScopeToolsError as exc:
+        log_event(log, logging.ERROR, "scope_tools_invalid", error=str(exc))
         raise SystemExit(2) from exc
     creds.start()
     try:
-        log_event(log, logging.INFO, "listening", port=config.port, issuer=config.issuer, audience=config.audience)
+        log_event(log, logging.INFO, "listening", port=config.port, issuer=config.issuer, audience=config.resource_url)
         await mcp.run_streamable_http_async(
             host="0.0.0.0",  # noqa: S104 - container port
             port=config.port,

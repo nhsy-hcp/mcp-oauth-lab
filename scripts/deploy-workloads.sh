@@ -1,10 +1,11 @@
 #!/bin/bash
-# Render and apply one namespace, annotated ServiceAccount, app-team RBAC, Proxy ConfigMap and (when
-# "pod" is not false) a Deployment per entry in a workloads file, then wait for the rollouts. Safe to re-run.
+# Render and apply one namespace, annotated ServiceAccount, app-team RBAC and Deployment per entry in a
+# workloads file, then wait for the rollouts. Workloads with a Vault role also get the Proxy ConfigMap. Safe to re-run.
 #
 # Usage: scripts/deploy-workloads.sh <workloads.json> <deployment-template> <deployment-name> <vault-role> <app-image> <proxy-image>
 #   e.g. scripts/deploy-workloads.sh vault/servers.json mcp-server-deployment mcp-orders mcp-server ...
-# Env: MCP_HOST_PORT (server), CLIENT_INTERVAL_SECONDS (clients)
+#   Use "none" for <vault-role> and <proxy-image> when the workload does not talk to Vault.
+# Env: MCP_HOST_PORT, AUTH_HOST_PORT, CLIENT_INTERVAL_SECONDS (clients)
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -17,15 +18,17 @@ VAULT_ROLE="${4:?${USAGE}}"
 APP_IMAGE="${5:?${USAGE}}"
 PROXY_IMAGE="${6:?${USAGE}}"
 MCP_HOST_PORT="${MCP_HOST_PORT:-8000}"
+AUTH_HOST_PORT="${AUTH_HOST_PORT:-3000}"
 CLIENT_INTERVAL_SECONDS="${CLIENT_INTERVAL_SECONDS:-30}"
 SERVER_NAME="$(jq -r '.[0].name' "${SERVERS_FILE}")"
 OUT_DIR=".tmp/rendered"
-BASE_TEMPLATES=(service-account app-team-rbac proxy-config)
+BASE_TEMPLATES=(service-account app-team-rbac)
+[ "${VAULT_ROLE}" = none ] || BASE_TEMPLATES+=(proxy-config)
 # Only these variables are substituted; anything else in the templates is left untouched
 # shellcheck disable=SC2016 # literal ${VAR} names for envsubst, not expansions
-SUBST_VARS='${APP_NAME} ${APPLICATION} ${ENVIRONMENT} ${TEAM} ${APP_IMAGE} ${PROXY_IMAGE} ${VAULT_ROLE} ${MCP_HOST_PORT} ${SERVER_NAME} ${CLIENT_TOOLS} ${CLIENT_INTERVAL_SECONDS}'
+SUBST_VARS='${APP_NAME} ${APPLICATION} ${ENVIRONMENT} ${TEAM} ${APP_IMAGE} ${PROXY_IMAGE} ${VAULT_ROLE} ${MCP_HOST_PORT} ${AUTH_HOST_PORT} ${SERVER_NAME} ${CLIENT_TOOLS} ${CLIENT_SCOPES} ${CLIENT_INTERVAL_SECONDS}'
 
-export APP_IMAGE PROXY_IMAGE VAULT_ROLE MCP_HOST_PORT SERVER_NAME CLIENT_INTERVAL_SECONDS
+export APP_IMAGE PROXY_IMAGE VAULT_ROLE MCP_HOST_PORT AUTH_HOST_PORT SERVER_NAME CLIENT_INTERVAL_SECONDS
 
 with_pods=""
 while read -r row <&3; do
@@ -34,8 +37,9 @@ while read -r row <&3; do
   ENVIRONMENT="$(jq -r .environment <<<"${row}")"
   TEAM="$(jq -r .team <<<"${row}")"
   CLIENT_TOOLS="$(jq -r '.tools // ""' <<<"${row}")"
+  CLIENT_SCOPES="$(jq -r '(.scopes // []) | join(" ")' <<<"${row}")"
   has_pod="$(jq -r 'if .pod == false then "false" else "true" end' <<<"${row}")"
-  export APP_NAME APPLICATION ENVIRONMENT TEAM CLIENT_TOOLS
+  export APP_NAME APPLICATION ENVIRONMENT TEAM CLIENT_TOOLS CLIENT_SCOPES
 
   templates=("${BASE_TEMPLATES[@]}")
   [ "${has_pod}" = true ] && templates+=("${DEPLOY_TPL}")

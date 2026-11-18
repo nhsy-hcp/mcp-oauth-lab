@@ -1,73 +1,122 @@
-"""MCP client pod: proves its identity to Vault, then calls the orders MCP server with a short-lived JWT.
+"""MCP client pod: logs in to Better Auth with its ServiceAccount JWT, then calls the orders MCP server.
 
 Every ``CLIENT_INTERVAL_SECONDS`` it lists the server's tools and calls each tool in ``CLIENT_TOOLS``,
-logging one JSON line per result. The bearer token comes from :class:`VaultIdentityAuth`, which reads
-``identity/oidc/token/<role>`` over this pod's own Vault Proxy socket (Proxy adds the pod's Vault
-token; the pod never holds it). The JWT is cached until shortly before it expires and is never logged.
-On SIGTERM the client revokes its Proxy token.
+logging one JSON line per result. The bearer token comes from :class:`ClientCredentialsAuth`, an OAuth
+``client_credentials`` grant authenticated by the pod's projected ServiceAccount token. The access token
+is cached until shortly before it expires. Neither token is ever logged.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import signal
 import threading
 import time
-from collections.abc import AsyncGenerator, Callable
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import AsyncGenerator, Callable, Iterable
 from typing import Any
 
 import anyio
 import httpx2
-import jwt
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 from mcp_lab.config import ClientConfig, ConfigError
 from mcp_lab.logging_setup import configure_logging, log_event
-from mcp_lab.vault_client import VaultClient
 
 log = logging.getLogger(__name__)
 
-REFRESH_BEFORE_EXPIRY = 60.0
+REFRESH_BEFORE_EXPIRY = 60.0  # or a quarter of the token lifetime, if that is shorter
+TOKEN_TIMEOUT_SECONDS = 10
+SERVICE_ACCOUNT_ASSERTION = "urn:lab:params:oauth:client-assertion-type:kubernetes-service-account"
 TOOL_ARGS: dict[str, dict[str, Any]] = {
     "list_orders": {"status": "pending"},
     "get_order": {"order_id": 1},
     "whoami": {},
 }
 
-VaultRead = Callable[[str], tuple[int, Any, Any]]
+TokenPost = Callable[[str, dict[str, str]], tuple[int, Any]]
 
 
 class TokenUnavailable(Exception):
     def __init__(self, status: int | None) -> None:
-        super().__init__(f"vault identity token unavailable (status {status})")
+        super().__init__(f"access token unavailable (status {status})")
         self.status = status
 
 
-class VaultIdentityAuth(httpx2.Auth):
-    """Adds a Vault identity JWT to every MCP request, minting a new one shortly before expiry."""
+def post_token_request(url: str, form: dict[str, str]) -> tuple[int, Any]:
+    """POST a form to the token endpoint. Returns the status and JSON body, for error responses too."""
+    request = urllib.request.Request(url, data=urllib.parse.urlencode(form).encode(), headers={"Accept": "application/json"})  # noqa: S310 - configured http(s) URL
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=TOKEN_TIMEOUT_SECONDS) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as exc:
+        with exc:
+            try:
+                return exc.code, json.load(exc)
+            except ValueError:
+                return exc.code, None
+    except ValueError:
+        return 502, None
 
-    def __init__(self, vault_read: VaultRead, role: str, clock: Callable[[], float] = time.time) -> None:
-        self._read = vault_read
-        self.role = role
+
+class ClientCredentialsAuth(httpx2.Auth):
+    """Adds a Better Auth access token to every MCP request, requesting a new one shortly before expiry."""
+
+    def __init__(
+        self,
+        token_url: str,
+        resource: str,
+        scopes: Iterable[str],
+        service_account_token: str,
+        post: TokenPost = post_token_request,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.token_url = token_url
+        self.resource = resource
+        self.scopes = tuple(scopes)
+        self.service_account_token = service_account_token
+        self._post = post
         self._clock = clock
         self._token: str | None = None
-        self._expires_at = 0.0
+        self._refresh_at = 0.0
         self._lock = threading.Lock()
+
+    def _request_token(self) -> None:
+        try:
+            with open(self.service_account_token, encoding="utf-8") as handle:
+                assertion = handle.read().strip()
+            form = {
+                "grant_type": "client_credentials",
+                "client_assertion_type": SERVICE_ACCOUNT_ASSERTION,
+                "client_assertion": assertion,
+                "resource": self.resource,
+            }
+            if self.scopes:
+                form["scope"] = " ".join(self.scopes)
+            status, body = self._post(self.token_url, form)
+        except OSError as exc:
+            log_event(log, logging.WARNING, "access_token_failed", error=type(exc).__name__)
+            raise TokenUnavailable(None) from exc
+        token = body.get("access_token") if isinstance(body, dict) else None
+        if status != 200 or not token:
+            log_event(log, logging.WARNING, "access_token_failed", status=status, error=body.get("error") if isinstance(body, dict) else None)
+            raise TokenUnavailable(status)
+        self._token = str(token)
+        lifetime = float(body.get("expires_in", 0))
+        self._refresh_at = self._clock() + lifetime - min(REFRESH_BEFORE_EXPIRY, lifetime / 4)
+        log_event(log, logging.INFO, "access_token_issued", scopes=list(self.scopes), expires_in=body.get("expires_in"))
 
     def token(self) -> str:
         with self._lock:
-            if self._token is None or self._clock() > self._expires_at - REFRESH_BEFORE_EXPIRY:
-                status, _, body = self._read(f"identity/oidc/token/{self.role}")
-                data = body.get("data") if isinstance(body, dict) else None
-                if status != 200 or not isinstance(data, dict) or not data.get("token"):
-                    log_event(log, logging.WARNING, "identity_token_failed", role=self.role, status=status)
-                    raise TokenUnavailable(status)
-                self._token = str(data["token"])
-                self._expires_at = self._clock() + float(data.get("ttl", 0))
-                claims = jwt.decode(self._token, options={"verify_signature": False})  # for logging only
-                log_event(log, logging.INFO, "identity_token_minted", role=self.role, sub=claims.get("sub"), groups=claims.get("groups"), aud=claims.get("aud"), ttl=data.get("ttl"))
+            if self._token is None or self._clock() > self._refresh_at:
+                self._request_token()
+            assert self._token is not None  # noqa: S101 - set by _request_token or it raised
             return self._token
 
     def auth_flow(self, request: httpx2.Request):
@@ -75,7 +124,7 @@ class VaultIdentityAuth(httpx2.Auth):
         yield request
 
     async def async_auth_flow(self, request: httpx2.Request) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
-        token = await anyio.to_thread.run_sync(self.token)  # blocking socket read off the event loop
+        token = await anyio.to_thread.run_sync(self.token)  # blocking file and network I/O off the event loop
         request.headers["Authorization"] = f"Bearer {token}"
         yield request
 
@@ -108,10 +157,11 @@ async def run_once(config: ClientConfig, auth: httpx2.Auth) -> None:
                 for name in config.tools:
                     result = await client.call_tool(name, TOOL_ARGS.get(name, {}))
                     log_event(log, logging.WARNING if result.is_error else logging.INFO, "tool_called", tool=name, **_summary(result))
-    except TokenUnavailable as exc:
-        log_event(log, logging.WARNING, "mcp_call_failed", error="token_unavailable", status=exc.status)
     except Exception as exc:
         cause = _root_cause(exc)
+        if isinstance(cause, TokenUnavailable):  # raised inside the SDK's task group, so it arrives wrapped
+            log_event(log, logging.WARNING, "mcp_call_failed", error="token_unavailable", status=cause.status)
+            return
         status = getattr(getattr(cause, "response", None), "status_code", None) or last_status.get("code")
         log_event(log, logging.WARNING, "mcp_call_failed", error=type(cause).__name__, status=status, detail=str(cause)[:200])
 
@@ -134,17 +184,9 @@ def main() -> int:
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
-    vault = VaultClient(config.vault_socket)
-    if not vault.wait_for_socket(max_wait=30.0):
-        return 1
-    log_event(log, logging.INFO, "client_started", mcp_url=config.mcp_url, role=config.token_role, tools=list(config.tools), interval=config.interval_seconds)
-    anyio.run(loop, config, VaultIdentityAuth(vault.read, config.token_role), stop)
-    try:
-        status = vault.revoke_self()
-        if status != 204:
-            log_event(log, logging.WARNING, "revoke_self_failed", status=status)
-    except OSError as exc:
-        log_event(log, logging.WARNING, "revoke_self_failed", error=type(exc).__name__)
+    log_event(log, logging.INFO, "client_started", mcp_url=config.mcp_url, scopes=list(config.scopes), tools=list(config.tools), interval=config.interval_seconds)
+    auth = ClientCredentialsAuth(config.token_url, config.resource, config.scopes, config.service_account_token)
+    anyio.run(loop, config, auth, stop)
     return 0
 
 

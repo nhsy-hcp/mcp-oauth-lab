@@ -14,13 +14,12 @@ HashiCorp Vault as an **identity broker for MCP auth**, on a local k3d cluster.
 
 ![Architecture](docs/images/architecture.png)
 
-> **Disclaimer: lab demo only.** This repository is for learning and is not a production reference architecture.
-> It runs plain HTTP, configures Vault with the root token, keeps unseal keys in a local file and runs a single
-> Vault node.
+> Disclaimer: lab demo only. This repository is for learning and is not a production reference architecture.
+> It runs plain HTTP and a single Vault node.
 >
-> Enterprise MCP deployments need a **production-grade OAuth 2.1 authorization server** (an enterprise IdP), as
+> Enterprise MCP deployments need a production-grade OAuth 2.1 authorization server (an enterprise IdP), as
 > described in the [MCP authorization specification](https://modelcontextprotocol.io/specification/latest/basic/authorization).
-> Clients such as Claude then use standard discovery and per-user consent instead of the pre-minted bearer tokens
+> Clients then use standard discovery and per-user consent instead of the pre-minted bearer tokens
 > used here. See [Limits and next steps](docs/solution-design.md#9-limits-and-next-steps).
 
 ## Quick start
@@ -34,6 +33,11 @@ task test:all # unit tests + live scenarios M1-M8 and A1-A12
 task mcp:token | sed 's/^/Authorization: Bearer /' | curl -s -X POST localhost:8000/mcp -H @- \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_orders","arguments":{"status":"pending"}}}'
+
+# No Vault group grants delete_order, so every caller gets "permission denied" and the order is untouched
+task mcp:token | sed 's/^/Authorization: Bearer /' | curl -s -X POST localhost:8000/mcp -H @- \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_order","arguments":{"order_id":1}}}'
 ```
 
 Claude Code picks up `.mcp.json` from the project root. Approve the `orders` server once; it fetches a fresh token
